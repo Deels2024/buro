@@ -63,3 +63,19 @@ jobs:
       - run: flutter analyze
       - run: flutter test
       - run: node tool/validate_project.js
+
+  stack:
+    runs-on: ubuntu-latest
+    needs: [backend, admin]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and smoke-test the Docker stack
+        run: ./install.sh
+      - name: Verify running services
+        run: ./scripts/check.sh
+      - name: Show service status on failure
+        if: failure()
+        run: docker compose ps --all
+      - name: Stop test stack
+        if: always()
+        run: docker compose down --volumes
