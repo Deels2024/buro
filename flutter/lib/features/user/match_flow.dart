@@ -105,7 +105,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
   }
 
   Widget _matchHub(BuildContext context) {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SoftCard(
@@ -303,25 +303,25 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
   Widget _chat(BuildContext context) {
     return Column(
       children: [
-        const NoticeCard('Чат защищён. Телефон, фамилия и точное место скрыты.'),
-        const SizedBox(height: 20),
-        const _Bubble(
+        NoticeCard('Чат защищён. Телефон, фамилия и точное место скрыты.'),
+        SizedBox(height: 20),
+        _Bubble(
           text: 'Уточните, пожалуйста, цвет внутренней подкладки.',
           time: '12:40',
         ),
-        const SizedBox(height: 10),
-        const _Bubble(
+        SizedBox(height: 10),
+        _Bubble(
           text: 'Тёмно-синяя. Возле зелёного ярлыка есть белая строчка.',
           time: '12:42 ✓✓',
           outgoing: true,
         ),
-        const SizedBox(height: 10),
-        const _Bubble(
+        SizedBox(height: 10),
+        _Bubble(
           text: 'Описание совпадает. Можно переходить к передаче.',
           time: '12:44',
         ),
-        const SizedBox(height: 22),
-        const TextField(
+        SizedBox(height: 22),
+        TextField(
           decoration: InputDecoration(
             hintText: 'Сообщение…',
             suffixIcon: Icon(Icons.send_rounded, color: BureauColors.blue),

@@ -61,10 +61,10 @@ class _ScreenCatalogPageState extends State<ScreenCatalogPage> {
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        _FilterChip('Все · 67', 0, BureauColors.blue),
-                        _FilterChip('Пользователь · 40', 1, BureauColors.blue),
-                        _FilterChip('Организация · 20', 2, BureauColors.green),
-                        _FilterChip('Модерация · 7', 3, BureauColors.amber),
+                        _filterChip('Все · 67', 0, BureauColors.blue),
+                        _filterChip('Пользователь · 40', 1, BureauColors.blue),
+                        _filterChip('Организация · 20', 2, BureauColors.green),
+                        _filterChip('Модерация · 7', 3, BureauColors.amber),
                       ],
                     ),
                   ),
@@ -97,7 +97,7 @@ class _ScreenCatalogPageState extends State<ScreenCatalogPage> {
     );
   }
 
-  Widget _FilterChip(String label, int value, Color color) {
+  Widget _filterChip(String label, int value, Color color) {
     final active = _role == value;
     return Padding(
       padding: const EdgeInsets.only(right: 8),

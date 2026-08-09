@@ -117,7 +117,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                                   borderRadius: BorderRadius.circular(42),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: slide.color.withOpacity(.14),
+                                      color: slide.color.withValues(alpha: .14),
                                       blurRadius: 42,
                                       offset: const Offset(0, 20),
                                     ),
@@ -166,7 +166,7 @@ class AuthPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 28),
-          TextField(
+          const TextField(
             keyboardType: TextInputType.phone,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.phone_rounded),
@@ -599,7 +599,7 @@ class _MapPin extends StatelessWidget {
         color: color,
         shape: BoxShape.circle,
         border: Border.all(color: Colors.white, width: 4),
-        boxShadow: [BoxShadow(color: color.withOpacity(.24), blurRadius: 18, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(color: color.withValues(alpha: .24), blurRadius: 18, offset: const Offset(0, 8))],
       ),
       child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900))),
     );
@@ -865,7 +865,7 @@ class ItemDetailPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = found ? BureauColors.green : BureauColors.amber;
     final soft = found ? BureauColors.greenSoft : BureauColors.amberSoft;
-    return BureauPage(
+    return const BureauPage(
       title: found ? 'Найдена вещь' : 'Потеряна вещь',
       subtitle: found ? 'Публикация подтверждена' : 'Владелец ищет похожую',
       actions: [IconButton(onPressed: () {}, icon: const Icon(Icons.bookmark_border_rounded))],
@@ -1053,7 +1053,7 @@ class NotificationsPage extends StatelessWidget {
       title: 'Уведомления',
       subtitle: '3 новых события',
       child: Column(
-        children: const [
+        children: [
           SettingRow(
             icon: Icons.auto_awesome_rounded,
             title: 'Новое совпадение · 93%',

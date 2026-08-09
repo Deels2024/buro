@@ -334,10 +334,10 @@ class _FraudAnalytics extends StatelessWidget {
                 child: SoftCard(
                   child: Row(
                     children: [
-                      Expanded(child: Text(row.$1, style: TextStyle(fontWeight: FontWeight.w800))),
-                      Text(row.$2, style: TextStyle(color: BureauColors.slate, fontSize: 10)),
-                      SizedBox(width: 16),
-                      Text(row.$3, style: TextStyle(color: BureauColors.red, fontWeight: FontWeight.w900)),
+                      Expanded(child: Text(row.$1, style: const TextStyle(fontWeight: FontWeight.w800))),
+                      Text(row.$2, style: const TextStyle(color: BureauColors.slate, fontSize: 10)),
+                      const SizedBox(width: 16),
+                      Text(row.$3, style: const TextStyle(color: BureauColors.red, fontWeight: FontWeight.w900)),
                     ],
                   ),
                 ),
@@ -449,7 +449,7 @@ class AdminDetailPage extends StatelessWidget {
           ].map(
             (row) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: SoftCard(child: Row(children: [BureauPill(row.$1, color: BureauColors.amber, background: BureauColors.amberSoft), SizedBox(width: 12), Expanded(child: Text(row.$2, style: TextStyle(fontWeight: FontWeight.w700)))])),
+              child: SoftCard(child: Row(children: [BureauPill(row.$1, color: BureauColors.amber, background: BureauColors.amberSoft), const SizedBox(width: 12), Expanded(child: Text(row.$2, style: const TextStyle(fontWeight: FontWeight.w700)))])),
             ),
           ),
           const SectionTitle('Решение'),
@@ -467,39 +467,39 @@ class AdminDetailPage extends StatelessWidget {
           ...const ['ИНН найден в ЕГРЮЛ', 'Домен подтверждён', 'Подписант имеет полномочия'].map(
             (item) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: SettingRow(icon: Icons.check_rounded, title: item, subtitle: 'Проверено автоматически', color: BureauColors.green, background: BureauColors.greenSoft, trailing: Icon(Icons.verified_rounded, color: BureauColors.green)),
+              child: SettingRow(icon: Icons.check_rounded, title: item, subtitle: 'Проверено автоматически', color: BureauColors.green, background: BureauColors.greenSoft, trailing: const Icon(Icons.verified_rounded, color: BureauColors.green)),
             ),
           ),
           const SettingRow(icon: Icons.location_searching_rounded, title: 'Проверить адрес филиала', subtitle: 'Лиговский пр., 30А', color: BureauColors.amber, background: BureauColors.amberSoft, trailing: BureauPill('НУЖНА ПРОВЕРКА', color: BureauColors.amber, background: BureauColors.amberSoft)),
         ],
       );
 
-  Widget _ads(BuildContext context) => Column(
+  Widget _ads(BuildContext context) => const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
               Expanded(child: MetricCard(value: '₽184К', label: 'доход за месяц', color: BureauColors.green)),
               SizedBox(width: 10),
               Expanded(child: MetricCard(value: '71%', label: 'видимость блоков', color: BureauColors.blue)),
             ],
           ),
-          const SizedBox(height: 10),
-          const Row(
+          SizedBox(height: 10),
+          Row(
             children: [
               Expanded(child: MetricCard(value: '0,08%', label: 'жалобы')),
               SizedBox(width: 10),
               Expanded(child: MetricCard(value: '1 / 5', label: 'частота в ленте', color: BureauColors.amber)),
             ],
           ),
-          const SectionTitle('Безопасные ограничения'),
-          const NoticeCard('Критические сценарии — 0 рекламы: доказательства, чат, контакты, QR и передача.'),
-          const SizedBox(height: 10),
-          const SettingRow(icon: Icons.ads_click_rounded, title: 'Контекстная реклама', subtitle: 'Без межприложного трекинга', color: BureauColors.green, background: BureauColors.greenSoft, trailing: BureauPill('ВКЛ', color: BureauColors.green, background: BureauColors.greenSoft)),
-          const SizedBox(height: 10),
-          const SettingRow(icon: Icons.tune_rounded, title: 'Персонализация', subtitle: 'Только после системного согласия', color: BureauColors.amber, background: BureauColors.amberSoft, trailing: BureauPill('OPT-IN', color: BureauColors.amber, background: BureauColors.amberSoft)),
-          const SectionTitle('Качество'),
-          const SettingRow(icon: Icons.verified_outlined, title: 'ERID и маркировка', subtitle: '100% рекламных событий', color: BureauColors.green, background: BureauColors.greenSoft, trailing: BureauPill('НОРМА', color: BureauColors.green, background: BureauColors.greenSoft)),
+          SectionTitle('Безопасные ограничения'),
+          NoticeCard('Критические сценарии — 0 рекламы: доказательства, чат, контакты, QR и передача.'),
+          SizedBox(height: 10),
+          SettingRow(icon: Icons.ads_click_rounded, title: 'Контекстная реклама', subtitle: 'Без межприложного трекинга', color: BureauColors.green, background: BureauColors.greenSoft, trailing: BureauPill('ВКЛ', color: BureauColors.green, background: BureauColors.greenSoft)),
+          SizedBox(height: 10),
+          SettingRow(icon: Icons.tune_rounded, title: 'Персонализация', subtitle: 'Только после системного согласия', color: BureauColors.amber, background: BureauColors.amberSoft, trailing: BureauPill('OPT-IN', color: BureauColors.amber, background: BureauColors.amberSoft)),
+          SectionTitle('Качество'),
+          SettingRow(icon: Icons.verified_outlined, title: 'ERID и маркировка', subtitle: '100% рекламных событий', color: BureauColors.green, background: BureauColors.greenSoft, trailing: BureauPill('НОРМА', color: BureauColors.green, background: BureauColors.greenSoft)),
         ],
       );
 }

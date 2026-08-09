@@ -282,7 +282,7 @@ class ItemArtwork extends StatelessWidget {
             borderRadius: BorderRadius.circular(30),
             boxShadow: [
               BoxShadow(
-                color: BureauColors.navy.withOpacity(.08),
+                color: BureauColors.navy.withValues(alpha: .08),
                 blurRadius: 30,
                 offset: const Offset(0, 16),
               ),

@@ -288,8 +288,8 @@ class _InventoryView extends StatelessWidget {
     return SafeArea(
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 14, 20, 10),
             child: _OrgHeader('Инвентарь', subtitle: '148 вещей · 3 филиала'),
           ),
           Expanded(
@@ -483,9 +483,9 @@ class _AnalyticsView extends StatelessWidget {
                 child: SoftCard(
                   child: Row(
                     children: [
-                      Expanded(child: Text(row.$1, style: TextStyle(fontWeight: FontWeight.w800))),
-                      Text('${row.$2} найдено', style: TextStyle(color: BureauColors.slate, fontSize: 10)),
-                      SizedBox(width: 16),
+                      Expanded(child: Text(row.$1, style: const TextStyle(fontWeight: FontWeight.w800))),
+                      Text('${row.$2} найдено', style: const TextStyle(color: BureauColors.slate, fontSize: 10)),
+                      const SizedBox(width: 16),
                       BureauPill(row.$3, color: BureauColors.green, background: BureauColors.greenSoft),
                     ],
                   ),
@@ -668,19 +668,19 @@ class OrganizationDetailPage extends StatelessWidget {
         ],
       );
 
-  Widget _media(BuildContext context) => Column(
+  Widget _media(BuildContext context) => const Column(
         children: [
-          const ItemArtwork(height: 260, color: BureauColors.green, background: BureauColors.greenSoft),
-          const SizedBox(height: 12),
-          const Row(
+          ItemArtwork(height: 260, color: BureauColors.green, background: BureauColors.greenSoft),
+          SizedBox(height: 12),
+          Row(
             children: [
               Expanded(child: _OrgMediaButton(Icons.add_a_photo_outlined, 'Ещё фото')),
               SizedBox(width: 10),
               Expanded(child: _OrgMediaButton(Icons.videocam_outlined, 'Видео')),
             ],
           ),
-          const SizedBox(height: 16),
-          const NoticeCard('Зафиксируйте состояние вещи и не публикуйте скрытые признаки.'),
+          SizedBox(height: 16),
+          NoticeCard('Зафиксируйте состояние вещи и не публикуйте скрытые признаки.'),
         ],
       );
 
@@ -757,10 +757,10 @@ class OrganizationDetailPage extends StatelessWidget {
         ],
       );
 
-  Widget _claim(BuildContext context) => Column(
+  Widget _claim(BuildContext context) => const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SoftCard(
+          SoftCard(
             color: BureauColors.greenSoft,
             borderColor: BureauColors.greenSoft,
             child: Row(
@@ -771,12 +771,12 @@ class OrganizationDetailPage extends StatelessWidget {
               ],
             ),
           ),
-          const SectionTitle('Скрытый признак'),
-          const SoftCard(child: Text('Зелёный ярлык AK во внутреннем кармане', style: TextStyle(fontWeight: FontWeight.w800))),
-          const SectionTitle('Доказательство'),
-          const SettingRow(icon: Icons.photo_library_outlined, title: 'Старое фото', subtitle: 'Создано до даты находки', color: BureauColors.green, background: BureauColors.greenSoft),
-          const SizedBox(height: 10),
-          const SettingRow(icon: Icons.quiz_outlined, title: '3 контрольных ответа', subtitle: 'Все совпадают с карточкой'),
+          SectionTitle('Скрытый признак'),
+          SoftCard(child: Text('Зелёный ярлык AK во внутреннем кармане', style: TextStyle(fontWeight: FontWeight.w800))),
+          SectionTitle('Доказательство'),
+          SettingRow(icon: Icons.photo_library_outlined, title: 'Старое фото', subtitle: 'Создано до даты находки', color: BureauColors.green, background: BureauColors.greenSoft),
+          SizedBox(height: 10),
+          SettingRow(icon: Icons.quiz_outlined, title: '3 контрольных ответа', subtitle: 'Все совпадают с карточкой'),
         ],
       );
 
@@ -808,7 +808,7 @@ class OrganizationDetailPage extends StatelessWidget {
           ...const ['Скрытый признак совпал', 'Старое фото подтверждено', 'Риск мошенничества низкий'].map(
             (item) => Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: SettingRow(icon: Icons.check_rounded, title: item, subtitle: 'Проверено системой и сотрудником', color: BureauColors.green, background: BureauColors.greenSoft, trailing: Icon(Icons.verified_rounded, color: BureauColors.green)),
+              child: SettingRow(icon: Icons.check_rounded, title: item, subtitle: 'Проверено системой и сотрудником', color: BureauColors.green, background: BureauColors.greenSoft, trailing: const Icon(Icons.verified_rounded, color: BureauColors.green)),
             ),
           ),
           const NoticeCard('После одобрения стороны выберут способ передачи.'),
