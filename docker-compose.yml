@@ -1,0 +1,156 @@
+name: bureau-nakhodok
+
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      admin:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  admin:
+    build: ./admin
+    environment:
+      BUREAU_API_URL: http://api:8080/v1
+      ADMIN_COOKIE_SECURE: "${ADMIN_COOKIE_SECURE:-false}"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    environment: &backend_environment
+      BN_ENVIRONMENT: "${BN_ENVIRONMENT:-development}"
+      BN_API_HOST: 0.0.0.0
+      BN_API_PORT: 8080
+      BN_APP_SECRET: "${BN_APP_SECRET}"
+      BN_LOOKUP_PEPPER: "${BN_LOOKUP_PEPPER}"
+      BN_PII_FERNET_KEY: "${BN_PII_FERNET_KEY}"
+      BN_DATABASE_URL: postgresql+asyncpg://bureau:${POSTGRES_PASSWORD}@postgres:5432/bureau
+      BN_REDIS_URL: redis://redis:6379/0
+      BN_CORS_ORIGINS: "[\"${PUBLIC_BASE_URL:-http://localhost}\"]"
+      BN_S3_ENDPOINT: http://minio:9000
+      BN_S3_PUBLIC_ENDPOINT: "${S3_PUBLIC_URL:-http://localhost:9000}"
+      BN_S3_REGION: ru-central1
+      BN_S3_BUCKET: bureau-media
+      BN_S3_ACCESS_KEY: bureau
+      BN_S3_SECRET_KEY: "${MINIO_PASSWORD}"
+      BN_S3_PRESIGN_TTL_SECONDS: 900
+      BN_OPENAI_API_KEY: "${BN_OPENAI_API_KEY:-}"
+      BN_OPENAI_MODEL: "${BN_OPENAI_MODEL:-gpt-5.6}"
+      BN_OPENCLIP_URL: http://openclip:8090
+      BN_OPENCLIP_TIMEOUT_SECONDS: 20
+      BN_SMS_PROVIDER_URL: "${BN_SMS_PROVIDER_URL:-}"
+      BN_SMS_PROVIDER_TOKEN: "${BN_SMS_PROVIDER_TOKEN:-}"
+      BN_BOOTSTRAP_ADMIN_PHONE: "${BN_BOOTSTRAP_ADMIN_PHONE:-+79990000000}"
+      BN_PUBLIC_API_URL: "${PUBLIC_BASE_URL:-http://localhost}/v1"
+      BN_SUPPORT_EMAIL: "${BN_SUPPORT_EMAIL:-support@bureau.local}"
+      BN_ADMIN_2FA_ISSUER: "Бюро находок"
+      BN_LOG_LEVEL: INFO
+    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --proxy-headers"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/v1/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    environment: *backend_environment
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: bureau
+      POSTGRES_USER: bureau
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bureau -d bureau"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: bureau
+      MINIO_ROOT_PASSWORD: "${MINIO_PASSWORD}"
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 bureau "$${MINIO_PASSWORD}"; do sleep 1; done
+        mc mb --ignore-existing local/bureau-media
+        mc anonymous set none local/bureau-media
+    environment:
+      MINIO_PASSWORD: "${MINIO_PASSWORD}"
+    restart: "no"
+
+  openclip:
+    profiles: ["ai"]
+    build: ./backend/openclip_service
+    environment:
+      OPENCLIP_MODEL: ViT-B-32
+      OPENCLIP_PRETRAINED: laion2b_s34b_b79k
+      OPENCLIP_ALLOWED_IMAGE_HOSTS: minio,localhost,127.0.0.1
+    volumes:
+      - openclip_cache:/home/openclip/.cache
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  openclip_cache:

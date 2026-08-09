@@ -1,0 +1,104 @@
+@base = http://localhost:8080/v1
+@token = paste_access_token
+@refresh = paste_refresh_token
+@listing = paste_listing_uuid
+@claim = paste_claim_uuid
+
+### Получить SMS-код (в development вернётся dev_code)
+POST {{base}}/auth/request-code
+Content-Type: application/json
+
+{"phone":"+7 999 123-45-67"}
+
+### Подтвердить код
+POST {{base}}/auth/verify-code
+Content-Type: application/json
+
+{"phone":"+7 999 123-45-67","code":"000000","device_name":"Flutter dev"}
+
+### Профиль
+GET {{base}}/users/me
+Authorization: Bearer {{token}}
+
+### Подписать загрузку фото
+POST {{base}}/media/presign
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"filename":"backpack.jpg","mime_type":"image/jpeg","size_bytes":123456,"purpose":"listing"}
+
+### ИИ-описание загруженного фото
+POST {{base}}/listings/ai/describe
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"media_id":"paste_media_uuid","kind":"lost","user_hint":"чёрный рюкзак"}
+
+### Поиск по фото
+POST {{base}}/listings/ai/search
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"media_id":"paste_media_uuid","target_kind":"found","region":"Москва","limit":20}
+
+### Создать публикацию
+POST {{base}}/listings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "kind":"lost",
+  "title":"Чёрный городской рюкзак",
+  "description":"Матовый рюкзак с двумя отделениями и красной молнией.",
+  "category":"Сумки",
+  "tags":["чёрный","рюкзак"],
+  "public_features":["красная молния"],
+  "hidden_features":["зелёный ярлык внутри"],
+  "event_at":"2026-08-04T12:00:00Z",
+  "location":{"region":"Москва, Тверской район","latitude":55.76,"longitude":37.61,"exact_address":"Тверская, 18"},
+  "media_ids":["paste_media_uuid"],
+  "publish":true
+}
+
+### Совпадения
+GET {{base}}/listings/{{listing}}/matches
+Authorization: Bearer {{token}}
+
+### Заявить права на находку
+POST {{base}}/claims
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"listing_id":"{{listing}}"}
+
+### Контрольные ответы
+PUT {{base}}/claims/{{claim}}/answers
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"answers":{"lining_color":"тёмно-синий","inside_detail":"зелёный ярлык"}}
+
+### Отправить заявление
+POST {{base}}/claims/{{claim}}/submit
+Authorization: Bearer {{token}}
+
+### Одобрить владельца — от держателя вещи
+POST {{base}}/claims/{{claim}}/decision
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"decision":"approved","reason":"Совпали скрытые признаки и старое фото"}
+
+### Согласие на контакты — вызывают обе стороны
+PUT {{base}}/claims/{{claim}}/contact-consent
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"consent":true}
+
+### Создать QR-передачу — от подтверждённого владельца
+POST {{base}}/claims/{{claim}}/handover
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"method":"safe_point","place":"SafePoint, Тверская, 18","scheduled_at":"2026-08-04T18:30:00Z"}

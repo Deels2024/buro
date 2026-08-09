@@ -1,0 +1,8 @@
+.env
+*.log
+backups/
+admin/node_modules/
+admin/.next/
+backend/.venv/
+flutter/.dart_tool/
+flutter/build/
