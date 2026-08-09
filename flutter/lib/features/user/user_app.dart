@@ -168,7 +168,7 @@ class AuthPage extends StatelessWidget {
           const SizedBox(height: 28),
           const TextField(
             keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               prefixIcon: Icon(Icons.phone_rounded),
               hintText: '+7 (___) ___-__-__',
             ),
@@ -865,7 +865,7 @@ class ItemDetailPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = found ? BureauColors.green : BureauColors.amber;
     final soft = found ? BureauColors.greenSoft : BureauColors.amberSoft;
-    return const BureauPage(
+    return BureauPage(
       title: found ? 'Найдена вещь' : 'Потеряна вещь',
       subtitle: found ? 'Публикация подтверждена' : 'Владелец ищет похожую',
       actions: [IconButton(onPressed: () {}, icon: const Icon(Icons.bookmark_border_rounded))],
@@ -1049,7 +1049,7 @@ class NotificationsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BureauPage(
+    return const BureauPage(
       title: 'Уведомления',
       subtitle: '3 новых события',
       child: Column(

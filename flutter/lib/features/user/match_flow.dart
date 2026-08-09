@@ -105,7 +105,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
   }
 
   Widget _matchHub(BuildContext context) {
-    return const Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SoftCard(
@@ -301,7 +301,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
   }
 
   Widget _chat(BuildContext context) {
-    return Column(
+    return const Column(
       children: [
         NoticeCard('Чат защищён. Телефон, фамилия и точное место скрыты.'),
         SizedBox(height: 20),
