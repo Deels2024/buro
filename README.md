@@ -8,7 +8,7 @@
 - MinIO для фотографий и файлов;
 - веб-админка, подключённая к реальным API;
 - Nginx как единая точка входа;
-- Flutter UI-прототип на 67 экранов и готовый API-клиент;
+- Flutter-приложение на 67 экранов, подключённое к backend;
 - OpenAPI-контракт, миграции и начальные данные.
 
 ## Запуск одной командой
@@ -80,14 +80,16 @@ flutter run --dart-define=BUREAU_API_URL=http://10.0.2.2/v1
 flutter run --dart-define=BUREAU_API_URL=https://api.example.ru/v1
 ```
 
-Полный OpenAPI-контракт находится в `backend/openapi.json`, готовый Flutter
-клиент — в `flutter/lib/data/bureau_api_client.dart`.
+Полный OpenAPI-контракт находится в `backend/openapi.json`, Flutter-клиент — в
+`flutter/lib/data/bureau_api_client.dart`, а карта 67 экранов к маршрутам — в
+`flutter/lib/data/screen_catalog.dart`.
 
-Важно: мобильная часть сейчас является кликабельным UI-прототипом. API-клиент
-добавлен, но ещё не внедрён в состояние и действия 67 экранов. Перед выпуском в
-App Store и Google Play необходимо подключить экраны к клиенту, добавить
-`flutter_secure_storage`, сгенерировать платформенные папки и пройти реальные
-Android/iOS сборки. Backend и веб-админка от этого ограничения не зависят.
+Мобильное приложение использует реальные SMS-сессии, хранит refresh token в
+Keychain/Android Keystore, обновляет access token после 401, загружает файлы по
+presigned URL, поддерживает ИИ-поиск, WebSocket-чат, кабинеты организаций и
+модератора. Для публикации в App Store и Google Play остаётся сгенерировать
+платформенные оболочки, настроить подписи, разрешения камеры/галереи, push
+FCM/APNs и выполнить device-тесты на production-домене.
 
 ## Автоматическая проверка
 

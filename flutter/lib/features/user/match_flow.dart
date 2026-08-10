@@ -1,10 +1,28 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/app_controller.dart';
+import '../../data/bureau_api_client.dart';
+import 'user_app.dart';
 
 class MatchFlowPage extends StatefulWidget {
-  const MatchFlowPage({super.key});
+  const MatchFlowPage({
+    super.key,
+    required this.listingId,
+    this.claimId,
+    this.targetListing,
+  });
+
+  final String listingId;
+  final String? claimId;
+  final JsonMap? targetListing;
 
   @override
   State<MatchFlowPage> createState() => _MatchFlowPageState();
@@ -12,37 +30,333 @@ class MatchFlowPage extends StatefulWidget {
 
 class _MatchFlowPageState extends State<MatchFlowPage> {
   int _step = 0;
+  bool _initialized = false;
+  bool _loading = true;
+  Object? _error;
+  JsonMap? _sourceListing;
+  List<JsonMap> _matches = const [];
+  JsonMap? _selectedMatch;
+  JsonMap? _claim;
+  JsonMap? _contact;
+  JsonMap? _handover;
+  UploadedMedia? _evidence;
+  final _answer1 = TextEditingController();
+  final _answer2 = TextEditingController();
+  final _answer3 = TextEditingController();
+  final _handoverPlace = TextEditingController();
+  String _handoverMethod = 'safe_point';
 
   static const _titles = [
     'Центр совпадений',
-    'Сравнение',
+    'Сравнение совпадения',
     'Подтверждение владельца',
     'Контрольные вопросы',
     'Доказательства',
     'Проверка заявления',
     'Защищённый чат',
-    'Открытие контактов',
+    'Согласие на контакты',
     'Способ передачи',
     'QR передачи',
     'Вещь возвращена',
   ];
 
-  void _next() => setState(
-        () => _step = (_step + 1).clamp(0, _titles.length - 1).toInt(),
-      );
+  BureauApiClient get _api => AppScope.of(context, listen: false).api;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initialized) {
+      _initialized = true;
+      _initialize();
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final controller in [_answer1, _answer2, _answer3, _handoverPlace]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _initialize() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      _sourceListing =
+          widget.targetListing ?? await _api.listing(widget.listingId);
+      if (widget.claimId != null) {
+        _claim = await _api.claim(widget.claimId!);
+        _step = _stepForStatus(_claim!['status']?.toString());
+        if (_step >= 7) await _loadApprovedState();
+      } else if (_sourceListing!['kind'] == 'lost') {
+        _matches = await _api.matches(widget.listingId);
+        if (_matches.isNotEmpty) _selectedMatch = _matches.first;
+        _step = 0;
+      } else {
+        _step = 1;
+      }
+    } catch (error) {
+      _error = error;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  int _stepForStatus(String? status) => switch (status) {
+    'draft' => 3,
+    'under_review' || 'needs_more_info' => 6,
+    'approved' => 7,
+    'completed' => 10,
+    'rejected' => 5,
+    _ => 2,
+  };
+
+  JsonMap get _claimListing {
+    final candidate = _selectedMatch?['candidate'];
+    if (candidate is Map) return Map<String, dynamic>.from(candidate);
+    return _sourceListing!;
+  }
+
+  Future<void> _loadApprovedState() async {
+    if (_claim == null) return;
+    _contact = await _api.contacts(_claim!['id'].toString());
+    try {
+      _handover = await _api.handover(_claim!['id'].toString());
+      if (_handover != null) {
+        _step = _handover!['completed_at'] == null ? 9 : 10;
+      }
+    } on BureauApiException catch (error) {
+      if (error.statusCode != 404) rethrow;
+    }
+  }
+
+  Future<void> _next() async {
+    switch (_step) {
+      case 0:
+        if (_selectedMatch == null) {
+          await _api.rematch(widget.listingId);
+          if (!mounted) return;
+          showApiSuccess(context, 'Повторный поиск запущен');
+          await _initialize();
+          return;
+        }
+        setState(() => _step = 1);
+        return;
+      case 1:
+        await _ensureClaim();
+        setState(() => _step = 2);
+        return;
+      case 2:
+        setState(() => _step = 3);
+        return;
+      case 3:
+        if ([
+          _answer1,
+          _answer2,
+          _answer3,
+        ].any((item) => item.text.trim().isEmpty)) {
+          throw BureauApiException(
+            422,
+            'Ответьте на все три контрольных вопроса',
+          );
+        }
+        _claim = await _api.saveClaimAnswers(_claim!['id'].toString(), {
+          'lining_color': _answer1.text.trim(),
+          'hidden_contents': _answer2.text.trim(),
+          'unique_mark': _answer3.text.trim(),
+        });
+        setState(() => _step = 4);
+        return;
+      case 4:
+        if (_evidence != null) {
+          _claim = await _api.addEvidence(
+            _claim!['id'].toString(),
+            _evidence!,
+            'old_photo',
+          );
+        }
+        setState(() => _step = 5);
+        return;
+      case 5:
+        if (_claim!['status'] == 'rejected') {
+          await _showAppeal();
+          return;
+        }
+        _claim = await _api.submitClaim(_claim!['id'].toString());
+        setState(() => _step = 6);
+        return;
+      case 6:
+        _claim = await _api.claim(_claim!['id'].toString());
+        final next = _stepForStatus(_claim!['status']?.toString());
+        if (next == 7) await _loadApprovedState();
+        setState(() => _step = next);
+        return;
+      case 7:
+        _contact = await _api.setContactConsent(_claim!['id'].toString(), true);
+        setState(() => _step = 8);
+        return;
+      case 8:
+        if (_handoverPlace.text.trim().length < 3) {
+          throw BureauApiException(422, 'Укажите место передачи');
+        }
+        _handover = await _api.createHandover(
+          _claim!['id'].toString(),
+          _handoverMethod,
+          _handoverPlace.text.trim(),
+        );
+        if (_handover!['qr_token'] == null) {
+          _handover = await _api.regenerateHandover(_claim!['id'].toString());
+        }
+        setState(() => _step = 9);
+        return;
+      case 9:
+        final token = _handover?['qr_token']?.toString();
+        if (token == null || token.isEmpty) {
+          _handover = await _api.regenerateHandover(_claim!['id'].toString());
+          setState(() {});
+          return;
+        }
+        _handover = await _api.scanHandover(token);
+        if (_handover!['completed_at'] != null) {
+          _claim = await _api.claim(_claim!['id'].toString());
+          setState(() => _step = 10);
+        } else {
+          if (!mounted) return;
+          showApiSuccess(
+            context,
+            'Ваша сторона подтверждена. Ожидаем вторую сторону.',
+          );
+          setState(() {});
+        }
+        return;
+      default:
+        Navigator.pop(context);
+    }
+  }
+
+  Future<void> _ensureClaim() async {
+    if (_claim != null) return;
+    final listingId = _claimListing['kind'] == 'found'
+        ? _claimListing['id'].toString()
+        : widget.listingId;
+    final matchId = _selectedMatch?['id']?.toString();
+    _claim = await _api.createClaim(listingId, matchId: matchId);
+  }
+
+  Future<void> _pickEvidence() async {
+    final file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 2048,
+    );
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    final mime =
+        file.mimeType ??
+        (file.name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+    _evidence = await _api.uploadMedia(
+      bytes: bytes,
+      filename: file.name,
+      mimeType: mime,
+      purpose: 'evidence',
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _showAppeal() async {
+    final controller = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Обжаловать решение'),
+        content: TextField(
+          controller: controller,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'Почему решение нужно пересмотреть?',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Отправить'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) {
+      await _api.appealClaim(_claim!['id'].toString(), controller.text);
+      if (mounted) showApiSuccess(context, 'Апелляция зарегистрирована');
+    }
+    controller.dispose();
+  }
+
+  String get _subtitle => switch (_step) {
+    0 => '${_matches.length} возможных совпадений',
+    1 => 'Сравните данные перед заявлением',
+    2 => 'Безопасная проверка за несколько шагов',
+    3 => 'Ответы хранятся в зашифрованном виде',
+    4 => 'Добавьте то, что существовало до пропажи',
+    5 => 'Проверьте данные перед отправкой',
+    6 => 'Статус: ${_claim?['status'] ?? ''}',
+    7 => 'Обе стороны должны дать согласие',
+    8 => 'Выберите безопасный способ',
+    9 => 'Обе стороны сканируют один код',
+    _ => 'Передача подтверждена backend',
+  };
+
+  String get _buttonLabel => switch (_step) {
+    0 => _matches.isEmpty ? 'Запустить повторный поиск' : 'Сравнить совпадение',
+    1 => 'Это может быть моё',
+    2 => 'Начать подтверждение',
+    3 => 'Сохранить ответы',
+    4 => 'Продолжить',
+    5 =>
+      _claim?['status'] == 'rejected'
+          ? 'Подать апелляцию'
+          : 'Отправить заявление',
+    6 => 'Обновить статус',
+    7 => 'Разрешить открыть контакты',
+    8 => 'Создать QR передачи',
+    9 =>
+      _handover?['qr_token'] == null ? 'Обновить QR' : 'Подтвердить получение',
+    _ => 'Готово',
+  };
 
   @override
   Widget build(BuildContext context) {
-    if (_step == 10) {
-      return _CompletePage(onDone: () => Navigator.pop(context));
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_error != null) {
+      return BureauPage(
+        title: 'Совпадения',
+        subtitle: 'Не удалось загрузить сценарий',
+        bottom: FilledButton(
+          onPressed: _initialize,
+          child: const Text('Повторить'),
+        ),
+        child: NoticeCard(
+          apiErrorText(_error!),
+          color: BureauColors.red,
+          background: BureauColors.redSoft,
+        ),
+      );
     }
     return BureauPage(
       title: _titles[_step],
       subtitle: _subtitle,
-      bottom: FilledButton(
-        style: FilledButton.styleFrom(backgroundColor: _step >= 6 ? BureauColors.green : BureauColors.blue),
+      bottom: ApiButton(
+        label: _buttonLabel,
+        backgroundColor: _step >= 6 ? BureauColors.green : BureauColors.blue,
         onPressed: _next,
-        child: Text(_buttonLabel),
       ),
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 220),
@@ -51,476 +365,633 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     );
   }
 
-  String get _subtitle => switch (_step) {
-        0 => 'Найдено 8 возможных совпадений',
-        1 => 'ИИ оценивает сходство в 93%',
-        2 => 'Безопасная проверка за несколько шагов',
-        3 => 'Ответы не увидят другие пользователи',
-        4 => 'Добавьте то, что существовало до пропажи',
-        5 => 'Проверим данные перед отправкой',
-        6 => 'Контакты пока скрыты',
-        7 => 'Обе стороны должны согласиться',
-        8 => 'Выберите удобный и безопасный вариант',
-        9 => 'Покажите код при получении',
-        _ => '',
-      };
-
-  String get _buttonLabel => switch (_step) {
-        0 => 'Сравнить совпадение',
-        1 => 'Это может быть моё',
-        2 => 'Начать подтверждение',
-        3 => 'Продолжить',
-        4 => 'Отправить доказательства',
-        5 => 'Отправить заявление',
-        6 => 'Данных достаточно',
-        7 => 'Разрешить открыть контакты',
-        8 => 'Создать QR передачи',
-        9 => 'Подтвердить получение',
-        _ => 'Продолжить',
-      };
-
-  Widget _body(BuildContext context) {
-    switch (_step) {
-      case 0:
-        return _matchHub(context);
-      case 1:
-        return _compare(context);
-      case 2:
-        return _claimStart(context);
-      case 3:
-        return _questions(context);
-      case 4:
-        return _evidence(context);
-      case 5:
-        return _review(context);
-      case 6:
-        return _chat(context);
-      case 7:
-        return _consent(context);
-      case 8:
-        return _handover(context);
-      default:
-        return _qr(context);
-    }
-  }
+  Widget _body(BuildContext context) => switch (_step) {
+    0 => _matchHub(context),
+    1 => _compare(context),
+    2 => _claimStart(context),
+    3 => _questions(context),
+    4 => _evidenceStep(context),
+    5 => _review(context),
+    6 => _chatAndStatus(context),
+    7 => _consent(context),
+    8 => _handoverStep(context),
+    9 => _qr(context),
+    _ => _complete(context),
+  };
 
   Widget _matchHub(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SoftCard(
-          color: BureauColors.greenSoft,
-          borderColor: BureauColors.greenSoft,
-          child: Column(
-            children: [
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  BureauPill('ЛУЧШЕЕ СОВПАДЕНИЕ', color: BureauColors.green, background: Colors.white),
-                  Text('93%', style: TextStyle(color: BureauColors.green, fontWeight: FontWeight.w900, fontSize: 30)),
-                ],
-              ),
-              const SizedBox(height: 18),
-              const ItemArtwork(height: 200, color: BureauColors.green, background: Colors.white),
-              const SizedBox(height: 16),
-              Text('Рюкзак с красной молнией', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 5),
-              Text('Москва · Тверская · найден сегодня', style: Theme.of(context).textTheme.bodyMedium),
-            ],
+    if (_matches.isEmpty) {
+      return const Column(
+        children: [
+          Icon(Icons.search_off_rounded, size: 90, color: BureauColors.muted),
+          SizedBox(height: 18),
+          NoticeCard(
+            'Совпадения ещё не рассчитаны. Запустите повторный поиск — worker обработает запись в фоне.',
           ),
-        ),
-        const SectionTitle('Ещё варианты'),
-        const LostItemCard(title: 'Городской рюкзак', meta: 'Арбат · вчера', score: 81),
-        const SizedBox(height: 10),
-        const LostItemCard(title: 'Чёрная спортивная сумка', meta: 'Хамовники · 3 дня назад', score: 68, icon: Icons.luggage_rounded),
+        ],
+      );
+    }
+    return Column(
+      children: [
+        for (final match in _matches) ...[
+          _MatchCandidateCard(
+            match: match,
+            selected: match['id'] == _selectedMatch?['id'],
+            onTap: () => setState(() => _selectedMatch = match),
+          ),
+          const SizedBox(height: 12),
+        ],
       ],
     );
   }
 
   Widget _compare(BuildContext context) {
-    const features = [('Форма', 96), ('Цвет', 94), ('Красная молния', 91), ('Место', 82), ('Дата', 78)];
+    final listing = _claimListing;
+    final factors = Map<String, dynamic>.from(
+      _selectedMatch?['factors'] as Map? ?? const {},
+    );
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
+        Row(
           children: [
-            Expanded(child: ItemArtwork(height: 160)),
-            SizedBox(width: 10),
-            Expanded(child: ItemArtwork(height: 160, color: BureauColors.green, background: BureauColors.greenSoft)),
+            Expanded(child: _MiniListing(listing: _sourceListing!)),
+            const SizedBox(width: 10),
+            Expanded(child: _MiniListing(listing: listing)),
           ],
         ),
         const SectionTitle('Совпавшие признаки'),
-        SoftCard(
-          child: Column(
-            children: features
-                .map(
-                  (item) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.check_circle_rounded, color: BureauColors.green, size: 19),
-                        const SizedBox(width: 9),
-                        Expanded(child: Text(item.$1, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 13))),
-                        Text('${item.$2}%', style: const TextStyle(color: BureauColors.green, fontWeight: FontWeight.w900)),
-                      ],
-                    ),
-                  ),
-                )
-                .toList(),
+        if (factors.isEmpty)
+          const NoticeCard(
+            'Для прямого заявления по находке оценка совпадения не требуется.',
           ),
-        ),
-        const SizedBox(height: 14),
-        const NoticeCard('ИИ помогает найти кандидата, но не подтверждает право собственности.'),
-      ],
-    );
-  }
-
-  Widget _claimStart(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const ItemArtwork(height: 190, color: BureauColors.green, background: BureauColors.greenSoft),
-        const SectionTitle('Как проходит проверка'),
-        ...[
-          (Icons.quiz_outlined, 'Ответьте на вопросы', 'О скрытых деталях, которых нет в публикации.'),
-          (Icons.photo_library_outlined, 'Добавьте доказательство', 'Старое фото, чек или упаковка — если есть.'),
-          (Icons.chat_bubble_outline_rounded, 'Уточните детали в чате', 'Контакты останутся скрыты до решения.'),
-        ].asMap().entries.map(
-          (entry) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: SettingRow(
-              icon: entry.value.$1,
-              title: '${entry.key + 1}. ${entry.value.$2}',
-              subtitle: entry.value.$3,
-              trailing: const Icon(Icons.check_rounded, color: BureauColors.green),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        const NoticeCard('Не сообщайте паспортные данные, коды из SMS и данные банковских карт.'),
-      ],
-    );
-  }
-
-  Widget _questions(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const BureauPill('ВОПРОС 1 ИЗ 3'),
-        const SizedBox(height: 18),
-        Text('Какого цвета внутренняя подкладка?', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 18),
-        const TextField(maxLines: 3, decoration: InputDecoration(hintText: 'Напишите ответ…')),
-        const SectionTitle('Вопрос 2'),
-        Text('Что находится во внутреннем кармане?', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 10),
-        const TextField(maxLines: 2, decoration: InputDecoration(hintText: 'Опишите уникальную деталь…')),
-        const SectionTitle('Вопрос 3'),
-        Text('Какой бренд указан на ярлыке?', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 10),
-        const TextField(decoration: InputDecoration(hintText: 'Название или первые буквы')),
-        const SizedBox(height: 14),
-        const NoticeCard('Ответы сравниваются со скрытой карточкой находки.'),
-      ],
-    );
-  }
-
-  Widget _evidence(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Подтвердите, что вещь была у вас до пропажи', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 18),
-        Container(
-          width: double.infinity,
-          height: 220,
-          decoration: BoxDecoration(
-            color: BureauColors.blueSoft,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: BureauColors.blue, width: 1.2),
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.add_photo_alternate_outlined, color: BureauColors.blue, size: 50),
-                const SizedBox(height: 10),
-                Text('Добавить старое фото', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: BureauColors.blue)),
-                Text('Метаданные помогут проверить дату', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
-              ],
-            ),
-          ),
-        ),
-        const SectionTitle('Дополнительно'),
-        const SettingRow(icon: Icons.receipt_long_outlined, title: 'Чек или гарантия', subtitle: 'Скройте платёжные данные'),
-        const SizedBox(height: 10),
-        const SettingRow(icon: Icons.inventory_2_outlined, title: 'Упаковка или серийный номер', subtitle: 'Будет виден только проверяющему'),
-        const SizedBox(height: 14),
-        const NoticeCard('Можно продолжить без документов — тогда организация задаст больше вопросов.'),
-      ],
-    );
-  }
-
-  Widget _review(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SoftCard(
-          color: BureauColors.greenSoft,
-          borderColor: BureauColors.greenSoft,
-          child: Row(
+        for (final factor in factors.entries) ...[
+          Row(
             children: [
-              Text('93%', style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: BureauColors.green)),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Высокая уверенность', style: Theme.of(context).textTheme.titleMedium),
-                    Text('Риск заявления низкий', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
-                  ],
+              const Icon(
+                Icons.check_circle_rounded,
+                color: BureauColors.green,
+                size: 19,
+              ),
+              const SizedBox(width: 9),
+              Expanded(child: Text(factor.key)),
+              Text(
+                '${(((factor.value as num?) ?? 0) * 100).round()}%',
+                style: const TextStyle(
+                  color: BureauColors.green,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
-              const BureauPill('НИЗКИЙ РИСК', color: BureauColors.green, background: Colors.white),
+            ],
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (factors.isNotEmpty)
+          OutlinedButton(
+            onPressed: () =>
+                pushPage(context, MatchExplanationPage(factors: factors)),
+            child: const Text('Подробное объяснение ИИ'),
+          ),
+        const SizedBox(height: 14),
+        const NoticeCard(
+          'ИИ помогает выбрать кандидата, но право собственности подтверждается отдельно.',
+        ),
+      ],
+    );
+  }
+
+  Widget _claimStart(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _MiniListing(listing: _claimListing, large: true),
+      const SectionTitle('Как проходит проверка'),
+      ...const [
+        (
+          Icons.quiz_outlined,
+          'Ответьте на вопросы',
+          'О скрытых деталях, которых нет в публикации.',
+        ),
+        (
+          Icons.photo_library_outlined,
+          'Добавьте доказательство',
+          'Старое фото, чек или упаковка — если есть.',
+        ),
+        (
+          Icons.chat_bubble_outline_rounded,
+          'Уточните детали в чате',
+          'Контакты останутся скрыты до решения.',
+        ),
+      ].map(
+        (entry) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: SettingRow(
+            icon: entry.$1,
+            title: entry.$2,
+            subtitle: entry.$3,
+          ),
+        ),
+      ),
+      const NoticeCard(
+        'Не сообщайте паспортные данные, коды из SMS и данные банковских карт.',
+      ),
+    ],
+  );
+
+  Widget _questions(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const BureauPill('3 КОНТРОЛЬНЫХ ВОПРОСА'),
+      const SizedBox(height: 18),
+      TextField(
+        controller: _answer1,
+        maxLines: 2,
+        decoration: const InputDecoration(
+          labelText: 'Какого цвета внутренняя часть?',
+        ),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _answer2,
+        maxLines: 2,
+        decoration: const InputDecoration(labelText: 'Что находилось внутри?'),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _answer3,
+        maxLines: 2,
+        decoration: const InputDecoration(
+          labelText: 'Какая уникальная метка или дефект?',
+        ),
+      ),
+      const SizedBox(height: 14),
+      const NoticeCard(
+        'Ответы шифруются backend и доступны только проверяющей стороне.',
+      ),
+    ],
+  );
+
+  Widget _evidenceStep(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      GestureDetector(
+        onTap: _pickEvidence,
+        child: Container(
+          height: 230,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: _evidence == null
+                ? BureauColors.blueSoft
+                : BureauColors.greenSoft,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: _evidence == null ? BureauColors.blue : BureauColors.green,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                _evidence == null
+                    ? Icons.add_photo_alternate_outlined
+                    : Icons.check_circle_rounded,
+                color: _evidence == null
+                    ? BureauColors.blue
+                    : BureauColors.green,
+                size: 54,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _evidence == null
+                    ? 'Добавить старое фото'
+                    : 'Доказательство загружено',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
             ],
           ),
         ),
-        const SectionTitle('Ваши ответы'),
-        const SettingRow(icon: Icons.quiz_outlined, title: '3 ответа заполнены', subtitle: 'Скрытые признаки указаны'),
-        const SizedBox(height: 10),
-        const SettingRow(
-          icon: Icons.photo_library_outlined,
-          title: 'Старое фото добавлено',
-          subtitle: 'Дата раньше публикации находки',
-          color: BureauColors.green,
-          background: BureauColors.greenSoft,
-        ),
-        const SectionTitle('Что произойдёт'),
-        const NoticeCard('Заявление получит нашедший вещь или сотрудник организации. Контакты пока останутся скрыты.'),
-      ],
-    );
-  }
+      ),
+      const SizedBox(height: 14),
+      const NoticeCard(
+        'Можно продолжить без документов. В этом случае backend повысит оценку риска и проверяющая сторона задаст больше вопросов.',
+      ),
+    ],
+  );
 
-  Widget _chat(BuildContext context) {
-    return const Column(
-      children: [
-        NoticeCard('Чат защищён. Телефон, фамилия и точное место скрыты.'),
-        SizedBox(height: 20),
-        _Bubble(
-          text: 'Уточните, пожалуйста, цвет внутренней подкладки.',
-          time: '12:40',
-        ),
-        SizedBox(height: 10),
-        _Bubble(
-          text: 'Тёмно-синяя. Возле зелёного ярлыка есть белая строчка.',
-          time: '12:42 ✓✓',
-          outgoing: true,
-        ),
-        SizedBox(height: 10),
-        _Bubble(
-          text: 'Описание совпадает. Можно переходить к передаче.',
-          time: '12:44',
-        ),
-        SizedBox(height: 22),
-        TextField(
-          decoration: InputDecoration(
-            hintText: 'Сообщение…',
-            suffixIcon: Icon(Icons.send_rounded, color: BureauColors.blue),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _consent(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          width: 130,
-          height: 130,
-          decoration: const BoxDecoration(color: BureauColors.greenSoft, shape: BoxShape.circle),
-          child: const Icon(Icons.handshake_outlined, color: BureauColors.green, size: 62),
-        ),
-        const SizedBox(height: 26),
-        Text('Владелец подтверждён', style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center),
-        const SizedBox(height: 10),
-        Text(
-          'Откройте контакты только если готовы договориться о безопасной передаче.',
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 22),
-        const SettingRow(
-          icon: Icons.phone_outlined,
-          title: 'Телефон',
-          subtitle: '+7 999 •••-42-10',
-          trailing: BureauPill('СКРЫТ'),
-        ),
-        const SizedBox(height: 10),
-        const SettingRow(
-          icon: Icons.location_on_outlined,
-          title: 'Точная точка',
-          subtitle: 'Откроется после согласия обеих сторон',
-          trailing: BureauPill('СКРЫТА'),
-        ),
-        const SizedBox(height: 16),
-        const NoticeCard('Сервис сохранит факт взаимного согласия в журнале безопасности.'),
-      ],
-    );
-  }
-
-  Widget _handover(BuildContext context) {
+  Widget _review(BuildContext context) {
+    final rejected = _claim?['status'] == 'rejected';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Как удобнее получить вещь?', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 18),
-        const SettingRow(
-          icon: Icons.storefront_outlined,
-          title: 'В безопасном пункте',
-          subtitle: 'SafePoint · 600 м · ежедневно до 22:00',
-          color: BureauColors.green,
-          background: BureauColors.greenSoft,
-          trailing: BureauPill('РЕКОМЕНДУЕМ', color: BureauColors.green, background: BureauColors.greenSoft),
-        ),
-        const SizedBox(height: 10),
-        const SettingRow(icon: Icons.people_outline_rounded, title: 'Личная встреча', subtitle: 'Выберите людное место и дневное время'),
-        const SizedBox(height: 10),
-        const SettingRow(icon: Icons.delivery_dining_outlined, title: 'Доставка', subtitle: 'После согласования стоимости и адреса'),
-        const SizedBox(height: 16),
-        const NoticeCard('Не переводите деньги за «подтверждение» и не сообщайте коды из SMS.'),
+        if (rejected)
+          NoticeCard(
+            _claim?['decision_reason']?.toString() ?? 'Заявление отклонено',
+            color: BureauColors.red,
+            background: BureauColors.redSoft,
+            icon: Icons.gavel_rounded,
+          )
+        else ...[
+          const SettingRow(
+            icon: Icons.quiz_outlined,
+            title: '3 ответа заполнены',
+            subtitle: 'Скрытые признаки готовы к проверке',
+          ),
+          const SizedBox(height: 10),
+          SettingRow(
+            icon: Icons.photo_library_outlined,
+            title: _evidence == null
+                ? 'Без медиа-доказательства'
+                : 'Старое фото добавлено',
+            subtitle: _evidence == null
+                ? 'Риск будет выше'
+                : 'Файл сохранён в защищённом хранилище',
+            color: _evidence == null ? BureauColors.amber : BureauColors.green,
+            background: _evidence == null
+                ? BureauColors.amberSoft
+                : BureauColors.greenSoft,
+          ),
+          const SizedBox(height: 14),
+          const NoticeCard(
+            'После отправки заявление получит нашедший вещь или сотрудник организации. Контакты останутся скрыты.',
+          ),
+        ],
       ],
     );
   }
+
+  Widget _chatAndStatus(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SettingRow(
+        icon: Icons.hourglass_top_rounded,
+        title: 'Статус: ${_claim?['status'] ?? ''}',
+        subtitle:
+            'Риск: ${(((_claim?['risk_score'] as num?) ?? 0) * 100).round()}%',
+        color: BureauColors.amber,
+        background: BureauColors.amberSoft,
+      ),
+      const SizedBox(height: 14),
+      if (_claim != null)
+        SizedBox(
+          height: 430,
+          child: ClaimChat(claimId: _claim!['id'].toString()),
+        ),
+      const SizedBox(height: 14),
+      const NoticeCard(
+        'Следующий шаг откроется после решения держателя вещи. Кнопка ниже обновляет статус с backend.',
+      ),
+    ],
+  );
+
+  Widget _consent(BuildContext context) => Column(
+    children: [
+      const Icon(Icons.lock_open_rounded, size: 90, color: BureauColors.green),
+      const SizedBox(height: 18),
+      Text(
+        'Владелец подтверждён',
+        style: Theme.of(context).textTheme.headlineSmall,
+      ),
+      const SizedBox(height: 14),
+      NoticeCard(
+        _contact?['unlocked'] == true
+            ? 'Обе стороны согласились. Контакты доступны.'
+            : 'Ваш телефон откроется только после согласия второй стороны.',
+        color: BureauColors.green,
+        background: BureauColors.greenSoft,
+      ),
+      if (_contact?['unlocked'] == true) ...[
+        const SizedBox(height: 14),
+        SettingRow(
+          icon: Icons.phone_outlined,
+          title: _contact?['holder_phone']?.toString() ?? 'Контакт держателя',
+          subtitle: 'Защищённое раскрытие',
+        ),
+      ],
+    ],
+  );
+
+  Widget _handoverStep(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      DropdownButtonFormField<String>(
+        initialValue: _handoverMethod,
+        items: const [
+          DropdownMenuItem(
+            value: 'safe_point',
+            child: Text('Безопасный пункт'),
+          ),
+          DropdownMenuItem(value: 'meeting', child: Text('Личная встреча')),
+          DropdownMenuItem(value: 'delivery', child: Text('Доставка')),
+        ],
+        onChanged: (value) => _handoverMethod = value ?? 'safe_point',
+        decoration: const InputDecoration(labelText: 'Способ передачи'),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _handoverPlace,
+        maxLines: 3,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.location_on_outlined),
+          labelText: 'Место и детали передачи',
+        ),
+      ),
+      const SizedBox(height: 14),
+      const NoticeCard(
+        'QR действует 20 минут. Для завершения его подтверждают обе стороны.',
+      ),
+    ],
+  );
 
   Widget _qr(BuildContext context) {
+    final token = _handover?['qr_token']?.toString();
     return Column(
       children: [
-        const _QrPattern(),
-        const SizedBox(height: 18),
-        Text('BN-4829-7314', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 6),
-        Text('Код действует 20 минут', style: Theme.of(context).textTheme.bodyMedium),
-        const SizedBox(height: 22),
-        const NoticeCard('Покажите QR только при фактическом получении вещи.'),
+        Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: BureauColors.green),
+          ),
+          child: token == null
+              ? const Icon(
+                  Icons.qr_code_rounded,
+                  size: 180,
+                  color: BureauColors.muted,
+                )
+              : QrImageView(
+                  data: token,
+                  size: 220,
+                  eyeStyle: const QrEyeStyle(
+                    color: BureauColors.green,
+                    eyeShape: QrEyeShape.square,
+                  ),
+                ),
+        ),
         const SizedBox(height: 14),
-        const SettingRow(
-          icon: Icons.storefront_outlined,
-          title: 'SafePoint · Тверская, 18',
-          subtitle: 'Сегодня · 18:30–19:00',
+        SettingRow(
+          icon: Icons.schedule_rounded,
+          title: 'Действует до ${_handover?['qr_expires_at'] ?? ''}',
+          subtitle: _handover?['completed_at'] == null
+              ? 'Ожидаются подтверждения обеих сторон'
+              : 'Передача завершена',
+        ),
+        const SizedBox(height: 14),
+        const NoticeCard(
+          'Не отправляйте QR посторонним. Он подтверждает физическую передачу вещи.',
+        ),
+      ],
+    );
+  }
+
+  Widget _complete(BuildContext context) => Column(
+    children: [
+      Container(
+        width: 150,
+        height: 150,
+        decoration: const BoxDecoration(
+          color: BureauColors.greenSoft,
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.favorite_rounded,
           color: BureauColors.green,
-          background: BureauColors.greenSoft,
+          size: 76,
+        ),
+      ),
+      const SizedBox(height: 24),
+      Text('Вещь возвращена', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 12),
+      const NoticeCard(
+        'Обе стороны подтвердили передачу. Публикация закрыта, а событие записано в журнал backend.',
+        color: BureauColors.green,
+        background: BureauColors.greenSoft,
+      ),
+    ],
+  );
+}
+
+class ClaimChat extends StatefulWidget {
+  const ClaimChat({super.key, required this.claimId});
+  final String claimId;
+  @override
+  State<ClaimChat> createState() => _ClaimChatState();
+}
+
+class _ClaimChatState extends State<ClaimChat> {
+  final _message = TextEditingController();
+  final List<JsonMap> _messages = [];
+  WebSocketChannel? _channel;
+  StreamSubscription? _subscription;
+  String? _conversationId;
+  Object? _error;
+  bool _loading = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_conversationId == null && _loading) _connect();
+  }
+
+  Future<void> _connect() async {
+    final api = AppScope.of(context, listen: false).api;
+    try {
+      final conversation = await api.claimConversation(widget.claimId);
+      _conversationId = conversation['conversation_id'].toString();
+      _messages.addAll(await api.chatMessages(_conversationId!));
+      _channel = await api.connectChat(_conversationId!);
+      _subscription = _channel!.stream.listen((event) {
+        try {
+          final map = event is Map ? Map<String, dynamic>.from(event) : null;
+          if (map != null &&
+              map['id'] != null &&
+              !_messages.any((item) => item['id'] == map['id'])) {
+            if (mounted) setState(() => _messages.add(map));
+          }
+        } catch (_) {}
+      });
+    } catch (error) {
+      _error = error;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _send() async {
+    final text = _message.text.trim();
+    if (text.isEmpty || _conversationId == null) return;
+    try {
+      final sent = await AppScope.of(
+        context,
+        listen: false,
+      ).api.sendChatMessage(_conversationId!, text);
+      _message.clear();
+      if (mounted && !_messages.any((item) => item['id'] == sent['id'])) {
+        setState(() => _messages.add(sent));
+      }
+    } catch (error) {
+      if (mounted) showApiError(context, error);
+    }
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    _channel?.sink.close();
+    _message.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return NoticeCard(
+        apiErrorText(_error!),
+        color: BureauColors.red,
+        background: BureauColors.redSoft,
+      );
+    }
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            itemCount: _messages.length,
+            itemBuilder: (context, index) {
+              final item = _messages[index];
+              return Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SoftCard(child: Text(item['body']?.toString() ?? '')),
+                ),
+              );
+            },
+          ),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _message,
+                decoration: const InputDecoration(hintText: 'Сообщение…'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filled(
+              onPressed: _send,
+              icon: const Icon(Icons.send_rounded),
+            ),
+          ],
         ),
       ],
     );
   }
 }
 
-class _Bubble extends StatelessWidget {
-  const _Bubble({required this.text, required this.time, this.outgoing = false});
-
-  final String text;
-  final String time;
-  final bool outgoing;
-
+class _MatchCandidateCard extends StatelessWidget {
+  const _MatchCandidateCard({
+    required this.match,
+    required this.selected,
+    required this.onTap,
+  });
+  final JsonMap match;
+  final bool selected;
+  final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 300),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: outgoing ? BureauColors.blue : Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(19),
-            topRight: const Radius.circular(19),
-            bottomLeft: Radius.circular(outgoing ? 19 : 5),
-            bottomRight: Radius.circular(outgoing ? 5 : 19),
-          ),
-          border: outgoing ? null : Border.all(color: BureauColors.line),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: outgoing ? Colors.white : BureauColors.navy)),
-            const SizedBox(height: 6),
-            Text(time, style: TextStyle(color: outgoing ? Colors.white70 : BureauColors.muted, fontSize: 8)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _QrPattern extends StatelessWidget {
-  const _QrPattern();
-
-  static const _active = {
-    0, 1, 2, 4, 5, 6, 7, 9, 13, 14, 16, 17, 18, 20, 21, 23, 25, 27, 28, 29, 30, 32,
-    33, 34, 36, 37, 39, 41, 42, 43, 44, 46, 48,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 270,
-      height: 270,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
-      child: GridView.builder(
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: 49,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, crossAxisSpacing: 5, mainAxisSpacing: 5),
-        itemBuilder: (_, index) => DecoratedBox(
-          decoration: BoxDecoration(
-            color: _active.contains(index) ? BureauColors.navy : Colors.transparent,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CompletePage extends StatelessWidget {
-  const _CompletePage({required this.onDone});
-
-  final VoidCallback onDone;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
+    final candidate = Map<String, dynamic>.from(match['candidate'] as Map);
+    final score = ((match['score'] as num?)?.toDouble() ?? 0);
+    return SoftCard(
+      onTap: onTap,
+      color: selected ? BureauColors.greenSoft : Colors.white,
+      borderColor: selected ? BureauColors.green : BureauColors.line,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Spacer(),
-              Container(
-                width: 150,
-                height: 150,
-                decoration: const BoxDecoration(color: BureauColors.greenSoft, shape: BoxShape.circle),
-                child: const Icon(Icons.favorite_rounded, color: BureauColors.green, size: 72),
+              BureauPill(
+                selected ? 'ВЫБРАНО' : 'КАНДИДАТ',
+                color: BureauColors.green,
+                background: Colors.white,
               ),
-              const SizedBox(height: 30),
-              Text('Вещь вернулась домой', style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
               Text(
-                'Передача подтверждена обеими сторонами. Публикация закрыта, контакты снова скрыты.',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              const BureauPill('ВОЗВРАЩЕНО', color: BureauColors.green, background: BureauColors.greenSoft, icon: Icons.check_rounded),
-              const Spacer(),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: BureauColors.green),
-                onPressed: onDone,
-                child: const Text('На главную'),
+                '${(score * 100).round()}%',
+                style: const TextStyle(
+                  color: BureauColors.green,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          Text(
+            candidate['title']?.toString() ?? '',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 5),
+          Text(
+            '${candidate['public_region'] ?? ''} · ${candidate['category'] ?? ''}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniListing extends StatelessWidget {
+  const _MiniListing({required this.listing, this.large = false});
+  final JsonMap listing;
+  final bool large;
+  @override
+  Widget build(BuildContext context) {
+    final found = listing['kind'] == 'found';
+    final media = listing['media'] as List? ?? const [];
+    final url = media.isEmpty
+        ? null
+        : (media.first as Map)['download_url']?.toString();
+    return SoftCard(
+      color: found ? BureauColors.greenSoft : BureauColors.blueSoft,
+      borderColor: found ? BureauColors.greenSoft : BureauColors.blueSoft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: large ? 190 : 120,
+            width: double.infinity,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: url == null
+                ? Icon(
+                    found
+                        ? Icons.volunteer_activism_rounded
+                        : Icons.search_off_rounded,
+                    color: found ? BureauColors.green : BureauColors.blue,
+                    size: 54,
+                  )
+                : Image.network(url, fit: BoxFit.cover),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            listing['title']?.toString() ?? '',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            listing['public_region']?.toString() ?? '',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontSize: 9),
+          ),
+        ],
       ),
     );
   }

@@ -25,7 +25,11 @@ class _ScreenCatalogPageState extends State<ScreenCatalogPage> {
     return allScreenSpecs.where((screen) {
       final matchesRole = role == null || screen.role == role;
       final query = _query.trim().toLowerCase();
-      final matchesQuery = query.isEmpty || '${screen.id} ${screen.title} ${screen.template}'.toLowerCase().contains(query);
+      final matchesQuery =
+          query.isEmpty ||
+          '${screen.id} ${screen.title} ${screen.template}'
+              .toLowerCase()
+              .contains(query);
       return matchesRole && matchesQuery;
     }).toList();
   }
@@ -40,7 +44,12 @@ class _ScreenCatalogPageState extends State<ScreenCatalogPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Все экраны', style: Theme.of(context).textTheme.titleLarge),
-            Text('67 сценариев · Flutter', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
+            Text(
+              '67 сценариев · Flutter',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+            ),
           ],
         ),
       ),
@@ -54,7 +63,10 @@ class _ScreenCatalogPageState extends State<ScreenCatalogPage> {
                 children: [
                   TextField(
                     onChanged: (value) => setState(() => _query = value),
-                    decoration: const InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'ID или название экрана'),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'ID или название экрана',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   SingleChildScrollView(
@@ -85,8 +97,13 @@ class _ScreenCatalogPageState extends State<ScreenCatalogPage> {
                     subtitle: '${screen.id} · ${screen.template}',
                     color: accent,
                     background: soft,
-                    trailing: BureauPill(screen.id, color: accent, background: soft),
-                    onTap: () => pushPage(context, CatalogPreviewPage(screen: screen)),
+                    trailing: BureauPill(
+                      screen.id,
+                      color: accent,
+                      background: soft,
+                    ),
+                    onTap: () =>
+                        pushPage(context, CatalogPreviewPage(screen: screen)),
                   );
                 },
               ),
@@ -121,9 +138,21 @@ class _ScreenCatalogPageState extends State<ScreenCatalogPage> {
 
 (Color, Color, IconData) _roleStyle(BureauRole role) {
   return switch (role) {
-    BureauRole.user => (BureauColors.blue, BureauColors.blueSoft, Icons.person_outline_rounded),
-    BureauRole.organization => (BureauColors.green, BureauColors.greenSoft, Icons.business_outlined),
-    BureauRole.admin => (BureauColors.amber, BureauColors.amberSoft, Icons.admin_panel_settings_outlined),
+    BureauRole.user => (
+      BureauColors.blue,
+      BureauColors.blueSoft,
+      Icons.person_outline_rounded,
+    ),
+    BureauRole.organization => (
+      BureauColors.green,
+      BureauColors.greenSoft,
+      Icons.business_outlined,
+    ),
+    BureauRole.admin => (
+      BureauColors.amber,
+      BureauColors.amberSoft,
+      Icons.admin_panel_settings_outlined,
+    ),
   };
 }
 
@@ -145,7 +174,9 @@ class CatalogPreviewPage extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [accent, Color.lerp(accent, Colors.white, .18)!]),
+              gradient: LinearGradient(
+                colors: [accent, Color.lerp(accent, Colors.white, .18)!],
+              ),
               borderRadius: BorderRadius.circular(28),
             ),
             child: Column(
@@ -153,17 +184,39 @@ class CatalogPreviewPage extends StatelessWidget {
               children: [
                 BureauPill(screen.id, color: accent, background: Colors.white),
                 const SizedBox(height: 24),
-                Text(screen.title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: Colors.white)),
+                Text(
+                  screen.title,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.headlineSmall?.copyWith(color: Colors.white),
+                ),
                 const SizedBox(height: 8),
-                Text(_roleLabel(screen.role), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(
+                  _roleLabel(screen.role),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
               ],
             ),
           ),
           const SizedBox(height: 18),
           _templatePreview(context, accent, soft),
           const SizedBox(height: 16),
+          const SectionTitle('API этого экрана'),
+          ...apiRoutesFor(screen).map(
+            (route) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: SettingRow(
+                icon: Icons.api_rounded,
+                title: route,
+                subtitle: 'Подключено через BureauApiClient',
+                color: accent,
+                background: soft,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           NoticeCard(
-            'Экран включён в общий Flutter-каталог и использует компоненты единой дизайн-системы.',
+            'Экран включён в общий Flutter-каталог, связан с указанными backend-маршрутами и использует единую обработку сессий и ошибок.',
             color: accent,
             background: soft,
             icon: Icons.widgets_outlined,
@@ -174,39 +227,72 @@ class CatalogPreviewPage extends StatelessWidget {
   }
 
   String _roleLabel(BureauRole role) => switch (role) {
-        BureauRole.user => 'Пользовательское приложение',
-        BureauRole.organization => 'Кабинет организации',
-        BureauRole.admin => 'Модерация и антифрод',
-      };
+    BureauRole.user => 'Пользовательское приложение',
+    BureauRole.organization => 'Кабинет организации',
+    BureauRole.admin => 'Модерация и антифрод',
+  };
 
   Widget _templatePreview(BuildContext context, Color accent, Color soft) {
     final template = screen.template.toLowerCase();
     if (template.contains('chat')) {
       return Column(
         children: [
-          const Align(alignment: Alignment.centerLeft, child: _PreviewBubble('Уточните скрытую деталь вещи.')),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: _PreviewBubble('Уточните скрытую деталь вещи.'),
+          ),
           const SizedBox(height: 10),
-          Align(alignment: Alignment.centerRight, child: _PreviewBubble('Она находится во внутреннем кармане.', color: accent)),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _PreviewBubble(
+              'Она находится во внутреннем кармане.',
+              color: accent,
+            ),
+          ),
           const SizedBox(height: 14),
-          const TextField(decoration: InputDecoration(hintText: 'Сообщение…', suffixIcon: Icon(Icons.send_rounded))),
+          const TextField(
+            decoration: InputDecoration(
+              hintText: 'Сообщение…',
+              suffixIcon: Icon(Icons.send_rounded),
+            ),
+          ),
         ],
       );
     }
     if (template.contains('qr') || template.contains('scanner')) {
       return Container(
         height: 290,
-        decoration: BoxDecoration(color: soft, borderRadius: BorderRadius.circular(26)),
-        child: Center(child: Icon(Icons.qr_code_scanner_rounded, color: accent, size: 120)),
+        decoration: BoxDecoration(
+          color: soft,
+          borderRadius: BorderRadius.circular(26),
+        ),
+        child: Center(
+          child: Icon(Icons.qr_code_scanner_rounded, color: accent, size: 120),
+        ),
       );
     }
-    if (template.contains('dashboard') || template.contains('analytics') || template.contains('fraud')) {
+    if (template.contains('dashboard') ||
+        template.contains('analytics') ||
+        template.contains('fraud')) {
       return Column(
         children: [
           Row(
             children: [
-              Expanded(child: MetricCard(value: '148', label: 'объектов', color: accent)),
+              Expanded(
+                child: MetricCard(
+                  value: '148',
+                  label: 'объектов',
+                  color: accent,
+                ),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: MetricCard(value: '93%', label: 'качество', color: accent)),
+              Expanded(
+                child: MetricCard(
+                  value: '93%',
+                  label: 'качество',
+                  color: accent,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -216,7 +302,22 @@ class CatalogPreviewPage extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [42.0, 76.0, 58.0, 96.0, 70.0, 108.0]
-                    .map((value) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: Container(height: value, decoration: BoxDecoration(color: accent, borderRadius: const BorderRadius.vertical(top: Radius.circular(7)))))))
+                    .map(
+                      (value) => Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 5),
+                          child: Container(
+                            height: value,
+                            decoration: BoxDecoration(
+                              color: accent,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(7),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
                     .toList(),
               ),
             ),
@@ -224,16 +325,37 @@ class CatalogPreviewPage extends StatelessWidget {
         ],
       );
     }
-    if (template.contains('media') || template.contains('detail') || template.contains('record') || template.contains('preview')) {
+    if (template.contains('media') ||
+        template.contains('detail') ||
+        template.contains('record') ||
+        template.contains('preview')) {
       return ItemArtwork(height: 240, color: accent, background: soft);
     }
     return Column(
       children: [
-        SettingRow(icon: Icons.auto_awesome_rounded, title: 'Умный сценарий', subtitle: 'ИИ помогает заполнить данные', color: accent, background: soft),
+        SettingRow(
+          icon: Icons.auto_awesome_rounded,
+          title: 'Умный сценарий',
+          subtitle: 'ИИ помогает заполнить данные',
+          color: accent,
+          background: soft,
+        ),
         const SizedBox(height: 10),
-        SettingRow(icon: Icons.shield_outlined, title: 'Защищённые данные', subtitle: 'Контакты и точное место скрыты', color: accent, background: soft),
+        SettingRow(
+          icon: Icons.shield_outlined,
+          title: 'Защищённые данные',
+          subtitle: 'Контакты и точное место скрыты',
+          color: accent,
+          background: soft,
+        ),
         const SizedBox(height: 10),
-        SettingRow(icon: Icons.notifications_none_rounded, title: 'Статус и уведомления', subtitle: 'Изменения приходят в реальном времени', color: accent, background: soft),
+        SettingRow(
+          icon: Icons.notifications_none_rounded,
+          title: 'Статус и уведомления',
+          subtitle: 'Изменения приходят в реальном времени',
+          color: accent,
+          background: soft,
+        ),
       ],
     );
   }
@@ -251,8 +373,18 @@ class _PreviewBubble extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(maxWidth: 290),
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(18), border: outgoing ? null : Border.all(color: BureauColors.line)),
-      child: Text(text, style: TextStyle(color: outgoing ? Colors.white : BureauColors.navy, fontSize: 12)),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(18),
+        border: outgoing ? null : Border.all(color: BureauColors.line),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: outgoing ? Colors.white : BureauColors.navy,
+          fontSize: 12,
+        ),
+      ),
     );
   }
 }

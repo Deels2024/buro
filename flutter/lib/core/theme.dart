@@ -83,7 +83,10 @@ abstract final class BureauTheme {
         filled: true,
         fillColor: Colors.white,
         hintStyle: const TextStyle(color: BureauColors.muted),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 17,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
           borderSide: const BorderSide(color: BureauColors.line),
@@ -100,7 +103,9 @@ abstract final class BureauTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size.fromHeight(54),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(17),
+          ),
           textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
         ),
       ),
@@ -108,7 +113,9 @@ abstract final class BureauTheme {
         style: OutlinedButton.styleFrom(
           minimumSize: const Size.fromHeight(52),
           side: const BorderSide(color: BureauColors.line),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(17),
+          ),
           textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
         ),
       ),

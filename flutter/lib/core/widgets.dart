@@ -34,7 +34,9 @@ class BureauPage extends StatelessWidget {
             if (subtitle != null)
               Text(
                 subtitle!,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontSize: 11),
               ),
           ],
         ),
@@ -45,10 +47,7 @@ class BureauPage extends StatelessWidget {
         child: Column(
           children: [
             Expanded(
-              child: SingleChildScrollView(
-                padding: padding,
-                child: child,
-              ),
+              child: SingleChildScrollView(padding: padding, child: child),
             ),
             if (bottom != null)
               Container(
@@ -78,7 +77,9 @@ class SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.only(top: 24, bottom: 12),
       child: Row(
         children: [
-          Expanded(child: Text(text, style: Theme.of(context).textTheme.titleMedium)),
+          Expanded(
+            child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+          ),
           if (trailing != null) trailing!,
         ],
       ),
@@ -104,7 +105,10 @@ class BureauPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(99)),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(99),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -114,7 +118,11 @@ class BureauPill extends StatelessWidget {
           ],
           Text(
             label,
-            style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -174,7 +182,10 @@ class IconTile extends StatelessWidget {
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(17)),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(17),
+      ),
       child: Icon(icon, color: color, size: size * .45),
     );
   }
@@ -200,10 +211,17 @@ class MetricCard extends StatelessWidget {
         children: [
           Text(
             value,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: color, fontSize: 23),
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(color: color, fontSize: 23),
           ),
           const SizedBox(height: 7),
-          Text(label, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+          ),
         ],
       ),
     );
@@ -228,7 +246,10 @@ class NoticeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(17)),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(17),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -237,7 +258,9 @@ class NoticeCard extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: color, fontSize: 11),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: color, fontSize: 11),
             ),
           ),
         ],
@@ -325,7 +348,10 @@ class LostItemCard extends StatelessWidget {
           Container(
             width: 92,
             height: 92,
-            decoration: BoxDecoration(color: soft, borderRadius: BorderRadius.circular(18)),
+            decoration: BoxDecoration(
+              color: soft,
+              borderRadius: BorderRadius.circular(18),
+            ),
             child: Icon(icon, color: accent, size: 42),
           ),
           const SizedBox(width: 14),
@@ -335,12 +361,19 @@ class LostItemCard extends StatelessWidget {
               children: [
                 Text(title, style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
-                Text(meta, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11)),
+                Text(
+                  meta,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontSize: 11),
+                ),
                 const SizedBox(height: 12),
                 BureauPill(
                   '$score% совпадение',
                   color: score >= 90 ? BureauColors.green : BureauColors.blue,
-                  background: score >= 90 ? BureauColors.greenSoft : BureauColors.blueSoft,
+                  background: score >= 90
+                      ? BureauColors.greenSoft
+                      : BureauColors.blueSoft,
                 ),
               ],
             ),
@@ -367,9 +400,17 @@ class NativeAdCard extends StatelessWidget {
             children: [
               Text(
                 'РЕКЛАМА · ПАРТНЁР СЕТИ',
-                style: TextStyle(color: BureauColors.muted, fontSize: 8, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  color: BureauColors.muted,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-              Icon(Icons.more_horiz_rounded, color: BureauColors.muted, size: 18),
+              Icon(
+                Icons.more_horiz_rounded,
+                color: BureauColors.muted,
+                size: 18,
+              ),
             ],
           ),
           const SizedBox(height: 11),
@@ -386,10 +427,15 @@ class NativeAdCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('SafePoint рядом', style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      'SafePoint рядом',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     Text(
                       'Безопасное хранение и передача вещей',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(fontSize: 10),
                     ),
                   ],
                 ),
@@ -442,11 +488,20 @@ class SettingRow extends StatelessWidget {
               children: [
                 Text(title, style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 4),
-                Text(subtitle, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
+                Text(
+                  subtitle,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+                ),
               ],
             ),
           ),
-          trailing ?? const Icon(Icons.chevron_right_rounded, color: BureauColors.muted),
+          trailing ??
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: BureauColors.muted,
+              ),
         ],
       ),
     );

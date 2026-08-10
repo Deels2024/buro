@@ -12,6 +12,9 @@ def test_liveness_and_openapi() -> None:
         assert schema["info"]["title"] == "Бюро находок API"
         assert "/v1/listings/ai/search" in schema["paths"]
         assert "/v1/claims/handover/scan" in schema["paths"]
+        assert "/v1/claims/{claim_id}/conversation" in schema["paths"]
+        assert "/v1/claims/{claim_id}/handover" in schema["paths"]
         assert "/v1/admin/analytics/overview" in schema["paths"]
         assert "/v1/admin/support/tickets" in schema["paths"]
         assert "/v1/app/bootstrap" in schema["paths"]
+        assert "get" in schema["paths"]["/v1/admin/ads"]

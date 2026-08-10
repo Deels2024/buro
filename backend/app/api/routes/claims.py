@@ -118,6 +118,16 @@ async def get_claim(claim_id: UUID, db: DB, user: CurrentUser) -> Claim:
     return claim
 
 
+@router.get("/{claim_id}/conversation")
+async def claim_conversation(claim_id: UUID, db: DB, user: CurrentUser) -> dict[str, str]:
+    claim, listing = await _claim_and_listing(db, claim_id)
+    await _assert_participant(db, user, claim, listing)
+    conversation = await db.scalar(select(Conversation).where(Conversation.claim_id == claim.id))
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Чат заявления не найден")
+    return {"conversation_id": str(conversation.id), "status": conversation.status}
+
+
 @router.put("/{claim_id}/answers", response_model=ClaimOut)
 async def save_answers(payload: ClaimAnswers, claim_id: UUID, db: DB, user: CurrentUser) -> Claim:
     claim, listing = await _claim_and_listing(db, claim_id)
@@ -354,6 +364,16 @@ async def create_handover(payload: HandoverCreate, claim_id: UUID, db: DB, user:
     await db.commit()
     await db.refresh(handover)
     return _handover_out(handover, raw_token)
+
+
+@router.get("/{claim_id}/handover", response_model=HandoverOut)
+async def get_handover(claim_id: UUID, db: DB, user: CurrentUser) -> HandoverOut:
+    claim, listing = await _claim_and_listing(db, claim_id)
+    await _assert_participant(db, user, claim, listing)
+    handover = await db.scalar(select(Handover).where(Handover.claim_id == claim.id))
+    if not handover:
+        raise HTTPException(status_code=404, detail="Передача ещё не создана")
+    return _handover_out(handover)
 
 
 def _handover_out(handover: Handover, raw_token: str | None = None) -> HandoverOut:

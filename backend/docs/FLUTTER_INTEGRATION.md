@@ -16,9 +16,9 @@
 | Центр совпадений | `GET /listings/{id}/matches` |
 | Подтверждение владельца | `POST /claims`, answers, evidence, submit |
 | Решение нашедшего/организации | `POST /claims/{id}/decision` |
-| Защищённый чат | HTTP history/send + WebSocket updates |
+| Защищённый чат | `GET /claims/{id}/conversation`, затем HTTP history/send + WebSocket updates |
 | Раскрытие контактов | `PUT /claims/{id}/contact-consent`, затем `GET /contacts` |
-| QR-передача | `POST /claims/{id}/handover`, обе стороны вызывают `/handover/scan` |
+| QR-передача | `GET/POST /claims/{id}/handover`, обе стороны вызывают `/handover/scan` |
 | Кабинет организации | `/organizations/{id}/dashboard`, `/inventory`, `/claims`, `/team` |
 | Модератор | `/admin/*` |
 | Нативная реклама | `GET /ads/current?placement=home_feed|search_results` |
