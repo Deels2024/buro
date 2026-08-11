@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type NavKey =
   | "overview"
@@ -267,6 +267,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   const [health, setHealth] = useState<Health | null>(null);
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const loadSummary = useCallback(async () => {
     const [analyticsResult, dashboardResult, auditResult] = await Promise.all([
@@ -334,6 +335,17 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
     return () => window.clearTimeout(timer);
   }, [section, query, loadSection]);
 
+  useEffect(() => {
+    function focusSearch(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, []);
+
   function navigate(key: NavKey) {
     setSection(key); setQuery(""); setMenuOpen(false); setSelected(null); setNotice("");
   }
@@ -355,29 +367,30 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
 
   return (
     <main className="admin-shell">
-      <aside className={"sidebar " + (menuOpen ? "open" : "")}>
-        <div className="brand"><span className="brand-mark">БН</span><div><strong>Бюро находок</strong><small>единая сеть</small></div><button className="mobile-close" onClick={() => setMenuOpen(false)}>×</button></div>
+      <a className="skip-link" href="#admin-content">Перейти к содержимому</a>
+      <aside className={"sidebar " + (menuOpen ? "open" : "")} aria-label="Главная навигация">
+        <div className="brand"><span className="brand-mark">БН</span><div><strong>Бюро находок</strong><small>единая сеть</small></div><button className="mobile-close" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)}>×</button></div>
         <div className="network-live"><i /><span><strong>Backend подключён</strong><small>данные обновляются по API</small></span></div>
         <nav>
           <small className="nav-label">УПРАВЛЕНИЕ</small>
-          {navigation.slice(0, 8).map((item) => <button key={item.key} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i>{item.icon}</i><span>{item.label}</span></button>)}
+          {navigation.slice(0, 8).map((item) => <button key={item.key} aria-current={section === item.key ? "page" : undefined} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i aria-hidden="true">{item.icon}</i><span>{item.label}</span></button>)}
           <small className="nav-label second">СИСТЕМА</small>
-          {navigation.slice(8).map((item) => <button key={item.key} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i>{item.icon}</i><span>{item.label}</span></button>)}
+          {navigation.slice(8).map((item) => <button key={item.key} aria-current={section === item.key ? "page" : undefined} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i aria-hidden="true">{item.icon}</i><span>{item.label}</span></button>)}
         </nav>
         <div className="sidebar-foot"><button className="profile" onClick={onLogout}><span>{(user.display_name || "А").slice(0, 2).toUpperCase()}</span><span><strong>{user.display_name || "Администратор"}</strong><small>{user.role === "moderator" ? "Модератор · выйти" : "Главный администратор · выйти"}</small></span><i>↗</i></button></div>
       </aside>
       {menuOpen && <button className="mobile-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />}
       <section className="workspace">
         <header className="topbar">
-          <button className="mobile-menu" onClick={() => setMenuOpen(true)}>☰</button>
-          <div className="global-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder} /><kbd>⌘ K</kbd></div>
+          <button className="mobile-menu" aria-label="Открыть меню" onClick={() => setMenuOpen(true)}>☰</button>
+          <div className="global-search"><span aria-hidden="true">⌕</span><input ref={searchRef} aria-label="Поиск по текущему разделу" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder} /><kbd>⌘ K</kbd></div>
           <div className="top-actions"><button className="sync" onClick={() => void loadSection(section, query)}><i />Обновить данные</button><button className="notification" aria-label="Открытые обращения" onClick={() => navigate("support")}>◌<b>{analytics?.operations.support_open ?? 0}</b></button></div>
         </header>
-        <div className="content">
-          <div className="page-head"><div><p>{today}</p><h1>{title.title}</h1><span>{title.subtitle}</span></div><div className="page-actions"><button className="period-button">Последние 30 дней</button><button className="primary-button" onClick={() => setAddOpen(true)}>＋ Добавить находку</button></div></div>
-          {error && <div className="alert error-alert"><strong>Ошибка</strong><span>{error}</span><button onClick={() => setError("")}>×</button></div>}
-          {notice && <div className="alert success-alert"><strong>Готово</strong><span>{notice}</span><button onClick={() => setNotice("")}>×</button></div>}
-          {loading && <div className="loading-line"><i /></div>}
+        <div className="content" id="admin-content" role="main">
+          <div className="page-head"><div><p>{today}</p><h1>{title.title}</h1><span>{title.subtitle}</span></div><div className="page-actions"><span className="period-button">Период: 30 дней</span><button className="primary-button" onClick={() => setAddOpen(true)}>＋ Добавить находку</button></div></div>
+          {error && <div className="alert error-alert" role="alert"><strong>Ошибка</strong><span>{error}</span><button aria-label="Закрыть сообщение" onClick={() => setError("")}>×</button></div>}
+          {notice && <div className="alert success-alert" role="status"><strong>Готово</strong><span>{notice}</span><button aria-label="Закрыть сообщение" onClick={() => setNotice("")}>×</button></div>}
+          {loading && <div className="loading-line" role="status" aria-label="Загрузка данных"><i /></div>}
           {section === "overview" && <Dashboard analytics={analytics} dashboard={dashboard} audit={audit} onNavigate={navigate} />}
           {section === "items" && <Listings rows={records as ListingRow[]} total={total} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
           {section === "claims" && <Claims rows={records as ClaimRow[]} total={total} onAction={action} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
@@ -449,7 +462,7 @@ function Settings({ rows, onAction }: { rows: SettingRow[]; onAction: (path: str
 }
 
 function DetailDrawer({ data, onClose }: { data: Record<string, unknown>; onClose: () => void }) {
-  return <div className="overlay" onMouseDown={onClose}><aside className="drawer" onMouseDown={(event) => event.stopPropagation()}><div className="drawer-head"><div><small>ДАННЫЕ ИЗ API</small><h2>{String(data.title ?? data.subject ?? data.name ?? data.id ?? "Карточка")}</h2></div><button onClick={onClose}>×</button></div><div className="drawer-section"><h3>Поля записи</h3><dl>{Object.entries(data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{typeof value === "object" ? JSON.stringify(value) : String(value ?? "—")}</dd></div>)}</dl></div><div className="drawer-actions"><button className="primary-button" onClick={onClose}>Закрыть</button></div></aside></div>;
+  return <div className="overlay" onMouseDown={onClose}><aside className="drawer" role="dialog" aria-modal="true" aria-label="Детали записи" onMouseDown={(event) => event.stopPropagation()}><div className="drawer-head"><div><small>ДАННЫЕ ИЗ API</small><h2>{String(data.title ?? data.subject ?? data.name ?? data.id ?? "Карточка")}</h2></div><button aria-label="Закрыть карточку" onClick={onClose}>×</button></div><div className="drawer-section"><h3>Поля записи</h3><dl>{Object.entries(data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{typeof value === "object" ? JSON.stringify(value) : String(value ?? "—")}</dd></div>)}</dl></div><div className="drawer-actions"><button className="primary-button" onClick={onClose}>Закрыть</button></div></aside></div>;
 }
 
 function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -470,7 +483,7 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: () =
       setError(caught instanceof Error ? caught.message : "Не удалось создать находку");
     } finally { setBusy(false); }
   }
-  return <div className="overlay modal-overlay" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="drawer-head"><div><small>BACKEND API</small><h2>Новая находка</h2></div><button type="button" onClick={onClose}>×</button></div><div className="form-grid"><label><span>Название</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} minLength={3} required /></label><label><span>Категория</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}><option value="personal">Личные вещи</option><option value="electronics">Электроника</option><option value="documents">Документы</option><option value="bags">Сумки</option><option value="keys">Ключи</option></select></label><label className="wide"><span>Описание</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} minLength={10} required /></label><label><span>Регион</span><input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} required /></label><label><span>Точное место</span><input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label className="wide"><span>Код хранения</span><input value={form.storage} onChange={(event) => setForm({ ...form, storage: event.target.value })} placeholder="Например, A-104" /></label></div>{error && <div className="form-error">{error}</div>}<div className="modal-actions"><button type="button" className="filter-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Создаём…" : "Создать в backend"}</button></div></form></div>;
+  return <div className="overlay modal-overlay" onMouseDown={onClose}><form className="modal" role="dialog" aria-modal="true" aria-label="Новая находка" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="drawer-head"><div><small>BACKEND API</small><h2>Новая находка</h2></div><button type="button" aria-label="Закрыть форму" onClick={onClose}>×</button></div><div className="form-grid"><label><span>Название</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} minLength={3} required /></label><label><span>Категория</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}><option value="personal">Личные вещи</option><option value="electronics">Электроника</option><option value="documents">Документы</option><option value="bags">Сумки</option><option value="keys">Ключи</option></select></label><label className="wide"><span>Описание</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} minLength={10} required /></label><label><span>Регион</span><input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} required /></label><label><span>Точное место</span><input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label className="wide"><span>Код хранения</span><input value={form.storage} onChange={(event) => setForm({ ...form, storage: event.target.value })} placeholder="Например, A-104" /></label></div>{error && <div className="form-error">{error}</div>}<div className="modal-actions"><button type="button" className="filter-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Создаём…" : "Создать в backend"}</button></div></form></div>;
 }
 
 function Empty({ text = "В базе пока нет записей" }: { text?: string }) {
