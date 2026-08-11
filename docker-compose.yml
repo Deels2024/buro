@@ -10,8 +10,20 @@ services:
     depends_on:
       admin:
         condition: service_healthy
+        restart: true
       api:
         condition: service_healthy
+        restart: true
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- http://127.0.0.1/ >/dev/null &&
+          wget -qO- http://127.0.0.1/v1/health/ready | grep -q '"status":"ready"'
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     restart: unless-stopped
 
   admin:
