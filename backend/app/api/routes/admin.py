@@ -221,6 +221,23 @@ async def create_ad_campaign(payload: AdCampaignCreate, db: DB, _: AdminUser) ->
     return campaign
 
 
+@router.get("/ads", response_model=list[AdCampaignOut])
+async def ad_campaigns(
+    db: DB,
+    _: AdminUser,
+    status: str | None = Query(default=None, max_length=24),
+    limit: int = Query(default=100, ge=1, le=100),
+) -> list[AdCampaign]:
+    filters = [AdCampaign.status == status] if status else []
+    result = await db.scalars(
+        select(AdCampaign)
+        .where(*filters)
+        .order_by(AdCampaign.created_at.desc())
+        .limit(limit)
+    )
+    return list(result)
+
+
 @router.patch("/ads/{campaign_id}/status", response_model=AdCampaignOut)
 async def update_ad_status(
     campaign_id: UUID,
