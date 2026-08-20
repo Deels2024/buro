@@ -10,9 +10,12 @@ const requiredFiles = [
   'lib/app.dart',
   'lib/core/theme.dart',
   'lib/core/widgets.dart',
+  'lib/core/api_widgets.dart',
   'lib/data/screen_catalog.dart',
   'lib/data/api_config.dart',
   'lib/data/bureau_api_client.dart',
+  'lib/data/app_controller.dart',
+  'lib/data/secure_token_store.dart',
   'lib/features/user/user_app.dart',
   'lib/features/user/create_flow.dart',
   'lib/features/user/match_flow.dart',
@@ -33,7 +36,7 @@ const catalog = fs.readFileSync(
   path.join(root, 'lib/data/screen_catalog.dart'),
   'utf8',
 );
-const ids = [...catalog.matchAll(/ScreenSpec\('([UOA]\d{2})'/g)].map(
+const ids = [...catalog.matchAll(/ScreenSpec\s*\(\s*'([UOA]\d{2})'/g)].map(
   (match) => match[1],
 );
 const uniqueIds = new Set(ids);
@@ -67,7 +70,7 @@ const criticalMarkers = [
   'QR передачи',
   'Кабинет организации',
   'Центр модерации',
-  'NativeAdCard',
+  '_LiveAdCard',
 ];
 const missingMarkers = criticalMarkers.filter(
   (marker) => !featureSources.includes(marker),
@@ -77,7 +80,7 @@ const apiClient = fs.readFileSync(
   path.join(root, 'lib/data/bureau_api_client.dart'),
   'utf8',
 );
-for (const marker of ['Idempotency-Key', '/auth/refresh', 'X-Request-ID', '/app/bootstrap']) {
+for (const marker of ['Idempotency-Key', '/auth/refresh', 'x-request-id', '/app/bootstrap']) {
   if (!apiClient.includes(marker)) {
     throw new Error(`API-клиент не содержит обязательный контракт: ${marker}`);
   }
@@ -85,6 +88,11 @@ for (const marker of ['Idempotency-Key', '/auth/refresh', 'X-Request-ID', '/app/
 
 if (missingMarkers.length > 0) {
   throw new Error(`Не найдены ключевые сценарии: ${missingMarkers.join(', ')}`);
+}
+
+const mappedIds = [...catalog.matchAll(/^\s*'([UOA]\d{2})': \[/gm)].map((match) => match[1]);
+if (mappedIds.length !== 67 || new Set(mappedIds).size !== 67) {
+  throw new Error(`Карта API должна содержать 67 экранов, найдено ${mappedIds.length}/${new Set(mappedIds).size}`);
 }
 
 console.log('Проверка пройдена.');

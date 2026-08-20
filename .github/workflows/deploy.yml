@@ -42,13 +42,14 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in {1..12}; do
-            admin_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://edinburo.ru/ || true)"
+            web_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://edinburo.ru/ || true)"
+            admin_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://admin.edinburo.ru/ || true)"
             api_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/v1/health/ready || true)"
-            if [[ "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* ]]; then
-              printf 'Public deployment is healthy (admin=%s).\n' "$admin_status"
+            if [[ "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* ]]; then
+              printf 'Public deployment is healthy (web=%s admin=%s).\n' "$web_status" "$admin_status"
               exit 0
             fi
-            printf 'Attempt %s/12: admin=%s api=%s\n' "$attempt" "$admin_status" "${api_body:-unavailable}"
+            printf 'Attempt %s/12: web=%s admin=%s api=%s\n' "$attempt" "$web_status" "$admin_status" "${api_body:-unavailable}"
             sleep 5
           done
 

@@ -57,7 +57,8 @@ fi
 
 echo
 echo "Бюро находок запущено."
-echo "Админка: ${PUBLIC_BASE_URL:-http://localhost}"
+echo "Пользовательский сайт: ${PUBLIC_BASE_URL:-http://localhost}"
+echo "Админка: ${ADMIN_BASE_URL:-http://admin.localhost}"
 echo "API: ${PUBLIC_BASE_URL:-http://localhost}/v1"
 echo "Документация API: ${PUBLIC_BASE_URL:-http://localhost}/docs"
 echo "MinIO: ${S3_PUBLIC_URL:-http://localhost:9000}"

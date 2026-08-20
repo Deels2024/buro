@@ -1,99 +1,192 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
+import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/app_controller.dart';
+import '../../data/bureau_api_client.dart';
+import '../user/create_flow.dart';
+import '../user/match_flow.dart';
 
 class OrganizationAuthPage extends StatelessWidget {
   const OrganizationAuthPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final app = AppScope.of(context);
     return BureauPage(
-      title: 'Вход для организаций',
-      subtitle: 'Единый инвентарь находок',
+      title: 'Организации',
+      subtitle: 'Доступ определяется членством backend',
+      bottom: OutlinedButton.icon(
+        onPressed: () => pushPage(context, const OrganizationCreatePage()),
+        icon: const Icon(Icons.add_business_rounded),
+        label: const Text('Подать заявку на подключение'),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 26),
-          Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(color: BureauColors.greenSoft, borderRadius: BorderRadius.circular(26)),
-            child: const Icon(Icons.business_rounded, color: BureauColors.green, size: 44),
+          const NoticeCard(
+            'Отдельного пароля организации нет: сотрудник входит по телефону, а backend проверяет его роль и членство.',
+            color: BureauColors.green,
+            background: BureauColors.greenSoft,
           ),
-          const SizedBox(height: 24),
-          Text('Подключите точку к поисковой сети', style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 12),
-          Text(
-            'Принимайте находки, проверяйте владельцев и контролируйте выдачу в одном кабинете.',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
-          ),
-          const SizedBox(height: 26),
-          const TextField(decoration: InputDecoration(prefixIcon: Icon(Icons.mail_outline_rounded), hintText: 'Рабочая почта')),
-          const SizedBox(height: 12),
-          const TextField(obscureText: true, decoration: InputDecoration(prefixIcon: Icon(Icons.lock_outline_rounded), hintText: 'Пароль')),
-          const SizedBox(height: 14),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: BureauColors.green),
-            onPressed: () => pushPage(context, const OrganizationVerifyPage()),
-            child: const Text('Войти'),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton(onPressed: () {}, child: const Text('Подать заявку на подключение')),
-          const SizedBox(height: 20),
-          const NoticeCard('Двухфакторный вход обязателен для администраторов организации.'),
+          const SectionTitle('Доступные организации'),
+          for (final organization in app.organizations) ...[
+            SettingRow(
+              icon: Icons.business_rounded,
+              title: organization['name']?.toString() ?? 'Организация',
+              subtitle:
+                  'ИНН ${organization['inn']} · ${organization['status']}',
+              color: BureauColors.green,
+              background: BureauColors.greenSoft,
+              onTap: () {
+                app.selectOrganization(organization);
+                pushPage(
+                  context,
+                  OrganizationVerifyPage(organization: organization),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
+          if (app.organizations.isEmpty)
+            const NoticeCard('У аккаунта пока нет членства в организации.'),
         ],
       ),
     );
   }
 }
 
+class OrganizationCreatePage extends StatefulWidget {
+  const OrganizationCreatePage({super.key});
+  @override
+  State<OrganizationCreatePage> createState() => _OrganizationCreatePageState();
+}
+
+class _OrganizationCreatePageState extends State<OrganizationCreatePage> {
+  final _name = TextEditingController();
+  final _inn = TextEditingController();
+  final _ogrn = TextEditingController();
+  @override
+  Widget build(BuildContext context) => BureauPage(
+    title: 'Подключить организацию',
+    subtitle: 'Заявка на проверку',
+    bottom: ApiButton(
+      label: 'Отправить заявку',
+      backgroundColor: BureauColors.green,
+      onPressed: () async {
+        final app = AppScope.of(context, listen: false);
+        final org = await app.api.createOrganization(
+          _name.text,
+          _inn.text,
+          ogrn: _ogrn.text.trim().isEmpty ? null : _ogrn.text.trim(),
+        );
+        await app.refreshIdentity();
+        if (!context.mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OrganizationVerifyPage(organization: org),
+          ),
+        );
+      },
+    ),
+    child: Column(
+      children: [
+        TextField(
+          controller: _name,
+          decoration: const InputDecoration(labelText: 'Название'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _inn,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'ИНН'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _ogrn,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'ОГРН — необязательно'),
+        ),
+        const SizedBox(height: 14),
+        const NoticeCard(
+          'После отправки организация получит статус pending. Проверку завершает модератор.',
+          color: BureauColors.amber,
+          background: BureauColors.amberSoft,
+        ),
+      ],
+    ),
+  );
+}
+
 class OrganizationVerifyPage extends StatelessWidget {
-  const OrganizationVerifyPage({super.key});
+  const OrganizationVerifyPage({super.key, required this.organization});
+  final JsonMap organization;
 
   @override
   Widget build(BuildContext context) {
+    final verified = organization['status'] == 'verified';
     return BureauPage(
       title: 'Проверка организации',
-      subtitle: 'ООО «Галерея Сервис»',
+      subtitle: organization['name']?.toString() ?? '',
       bottom: FilledButton(
         style: FilledButton.styleFrom(backgroundColor: BureauColors.green),
-        onPressed: () => pushPage(context, const OrganizationShell()),
-        child: const Text('Открыть кабинет'),
+        onPressed: () =>
+            pushPage(context, OrganizationShell(organization: organization)),
+        child: Text(
+          verified ? 'Открыть кабинет' : 'Открыть ограниченный кабинет',
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SoftCard(
-            color: BureauColors.greenSoft,
-            borderColor: BureauColors.greenSoft,
+          SoftCard(
+            color: verified ? BureauColors.greenSoft : BureauColors.amberSoft,
+            borderColor: verified
+                ? BureauColors.greenSoft
+                : BureauColors.amberSoft,
             child: Row(
               children: [
-                IconTile(icon: Icons.verified_rounded, color: BureauColors.green, background: Colors.white),
-                SizedBox(width: 12),
-                Expanded(child: Text('Организация подтверждена', style: TextStyle(color: BureauColors.green, fontWeight: FontWeight.w900))),
-                BureauPill('ГОТОВО', color: BureauColors.green, background: Colors.white),
+                IconTile(
+                  icon: verified
+                      ? Icons.verified_rounded
+                      : Icons.hourglass_top_rounded,
+                  color: verified ? BureauColors.green : BureauColors.amber,
+                  background: Colors.white,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    verified
+                        ? 'Организация подтверждена'
+                        : 'Заявка ожидает проверки',
+                    style: TextStyle(
+                      color: verified ? BureauColors.green : BureauColors.amber,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          const SectionTitle('Автопроверки'),
-          ...const [
-            ('ИНН найден в ЕГРЮЛ', '7812345678'),
-            ('Домен подтверждён', 'galeria.spb.ru'),
-            ('Подписант проверен', 'Полномочия действуют'),
-            ('Филиал подтверждён', 'Лиговский пр., 30А'),
-          ].map(
-            (row) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: SettingRow(
-                icon: Icons.check_rounded,
-                title: row.$1,
-                subtitle: row.$2,
-                color: BureauColors.green,
-                background: BureauColors.greenSoft,
-                trailing: const Icon(Icons.verified_rounded, color: BureauColors.green),
-              ),
-            ),
+          const SectionTitle('Данные заявки'),
+          SettingRow(
+            icon: Icons.business_outlined,
+            title: organization['name']?.toString() ?? '',
+            subtitle: 'ИНН ${organization['inn']}',
+          ),
+          const SizedBox(height: 10),
+          SettingRow(
+            icon: Icons.api_rounded,
+            title: 'API интеграция',
+            subtitle: organization['api_enabled'] == true
+                ? 'Включена'
+                : 'Выключена',
+            color: BureauColors.green,
+            background: BureauColors.greenSoft,
           ),
         ],
       ),
@@ -102,36 +195,28 @@ class OrganizationVerifyPage extends StatelessWidget {
 }
 
 class OrganizationShell extends StatefulWidget {
-  const OrganizationShell({super.key});
-
+  const OrganizationShell({super.key, required this.organization});
+  final JsonMap organization;
   @override
   State<OrganizationShell> createState() => _OrganizationShellState();
 }
 
 class _OrganizationShellState extends State<OrganizationShell> {
   int _index = 0;
-
   @override
   Widget build(BuildContext context) {
-    const pages = [
-      _OrgDashboard(),
-      _InventoryView(),
-      _ClaimsView(),
-      _TeamView(),
-      _AnalyticsView(),
+    final pages = [
+      OrgDashboardPage(organization: widget.organization),
+      OrgInventoryPage(organization: widget.organization),
+      OrgClaimsPage(organization: widget.organization),
+      OrgTeamPage(organization: widget.organization),
+      OrgAnalyticsPage(organization: widget.organization),
     ];
     return Theme(
       data: Theme.of(context).copyWith(
-        navigationBarTheme: Theme.of(context).navigationBarTheme.copyWith(
-              indicatorColor: BureauColors.greenSoft,
-              labelTextStyle: WidgetStateProperty.resolveWith(
-                (states) => TextStyle(
-                  color: states.contains(WidgetState.selected) ? BureauColors.green : BureauColors.muted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
+        navigationBarTheme: Theme.of(
+          context,
+        ).navigationBarTheme.copyWith(indicatorColor: BureauColors.greenSoft),
       ),
       child: Scaffold(
         body: IndexedStack(index: _index, children: pages),
@@ -139,11 +224,31 @@ class _OrganizationShellState extends State<OrganizationShell> {
           selectedIndex: _index,
           onDestinationSelected: (value) => setState(() => _index = value),
           destinations: const [
-            NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard_rounded), label: 'Обзор'),
-            NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2_rounded), label: 'Склад'),
-            NavigationDestination(icon: Icon(Icons.fact_check_outlined), selectedIcon: Icon(Icons.fact_check_rounded), label: 'Заявки'),
-            NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups_rounded), label: 'Команда'),
-            NavigationDestination(icon: Icon(Icons.analytics_outlined), selectedIcon: Icon(Icons.analytics_rounded), label: 'Отчёт'),
+            NavigationDestination(
+              icon: Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard_rounded),
+              label: 'Обзор',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.inventory_2_outlined),
+              selectedIcon: Icon(Icons.inventory_2_rounded),
+              label: 'Склад',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.fact_check_outlined),
+              selectedIcon: Icon(Icons.fact_check_rounded),
+              label: 'Заявки',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.groups_outlined),
+              selectedIcon: Icon(Icons.groups_rounded),
+              label: 'Команда',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.analytics_outlined),
+              selectedIcon: Icon(Icons.analytics_rounded),
+              label: 'Отчёт',
+            ),
           ],
         ),
       ),
@@ -152,782 +257,1072 @@ class _OrganizationShellState extends State<OrganizationShell> {
 }
 
 class _OrgHeader extends StatelessWidget {
-  const _OrgHeader(this.title, {this.subtitle = 'ТЦ «Галерея»'});
-
+  const _OrgHeader(this.title, this.organization, {this.actions = const []});
   final String title;
-  final String subtitle;
-
+  final JsonMap organization;
+  final List<Widget> actions;
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(color: BureauColors.green, borderRadius: BorderRadius.circular(14)),
-          child: const Center(child: Text('ТЦ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900))),
+  Widget build(BuildContext context) => Row(
+    children: [
+      Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: BureauColors.green,
+          borderRadius: BorderRadius.circular(14),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
-              Text(subtitle, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
-            ],
-          ),
-        ),
-        const BureauPill('СМЕНА', color: BureauColors.green, background: BureauColors.greenSoft),
-      ],
-    );
-  }
-}
-
-class _OrgDashboard extends StatelessWidget {
-  const _OrgDashboard();
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+        child: const Icon(Icons.business_rounded, color: Colors.white),
+      ),
+      const SizedBox(width: 12),
+      Expanded(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _OrgHeader('Операционный обзор'),
-            const SizedBox(height: 22),
-            const Row(
-              children: [
-                Expanded(child: MetricCard(value: '148', label: 'вещей на хранении')),
-                SizedBox(width: 10),
-                Expanded(child: MetricCard(value: '17', label: 'новых заявлений', color: BureauColors.green)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            const Row(
-              children: [
-                Expanded(child: MetricCard(value: '68%', label: 'возвращено за месяц', color: BureauColors.green)),
-                SizedBox(width: 10),
-                Expanded(child: MetricCard(value: '4,8 мин', label: 'средняя приёмка')),
-              ],
-            ),
-            const SectionTitle('Быстрые действия'),
-            Row(
-              children: [
-                Expanded(
-                  child: _OrgQuick(
-                    icon: Icons.qr_code_scanner_rounded,
-                    title: 'Принять вещь',
-                    onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.scanner)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _OrgQuick(
-                    icon: Icons.upload_file_rounded,
-                    title: 'Массовый импорт',
-                    onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.bulk)),
-                  ),
-                ),
-              ],
-            ),
-            const SectionTitle('Требуют внимания'),
-            SettingRow(
-              icon: Icons.fact_check_outlined,
-              title: '7 заявлений ждут решения',
-              subtitle: 'Самое старое · 1 ч 24 мин',
-              color: BureauColors.amber,
-              background: BureauColors.amberSoft,
-              trailing: const BureauPill('7', color: BureauColors.amber, background: BureauColors.amberSoft),
-              onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.claimDetail)),
-            ),
-            const SizedBox(height: 10),
-            SettingRow(
-              icon: Icons.location_on_outlined,
-              title: 'Ячейка B-24 заполнена',
-              subtitle: 'Назначьте новое место хранения',
-              onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.storage)),
+            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              organization['name']?.toString() ?? '',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontSize: 10),
             ),
           ],
         ),
       ),
-    );
-  }
+      ...actions,
+    ],
+  );
 }
 
-class _OrgQuick extends StatelessWidget {
-  const _OrgQuick({required this.icon, required this.title, required this.onTap});
-
-  final IconData icon;
-  final String title;
-  final VoidCallback onTap;
-
+class OrgDashboardPage extends StatefulWidget {
+  const OrgDashboardPage({super.key, required this.organization});
+  final JsonMap organization;
   @override
-  Widget build(BuildContext context) {
-    return SoftCard(
-      onTap: onTap,
-      color: BureauColors.greenSoft,
-      borderColor: BureauColors.greenSoft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: BureauColors.green, size: 29),
-          const SizedBox(height: 20),
-          Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: BureauColors.green)),
-        ],
-      ),
-    );
-  }
+  State<OrgDashboardPage> createState() => _OrgDashboardPageState();
 }
 
-class _InventoryView extends StatelessWidget {
-  const _InventoryView();
+class _OrgDashboardPageState extends State<OrgDashboardPage> {
+  late Future<JsonMap> _future;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _future = AppScope.of(
+      context,
+      listen: false,
+    ).api.organizationDashboard(widget.organization['id'].toString());
+  }
 
   @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 14, 20, 10),
-            child: _OrgHeader('Инвентарь', subtitle: '148 вещей · 3 филиала'),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 28),
-              child: Column(
+  Widget build(BuildContext context) => SafeArea(
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+      children: [
+        _OrgHeader(
+          'Операционный обзор',
+          widget.organization,
+          actions: [
+            IconButton(
+              onPressed: () => pushPage(
+                context,
+                OrganizationSettingsPage(organization: widget.organization),
+              ),
+              icon: const Icon(Icons.settings_outlined),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        ApiFutureBuilder<JsonMap>(
+          future: _future,
+          builder: (context, data) => Column(
+            children: [
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      const Expanded(child: TextField(decoration: InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'ID, вещь или ячейка'))),
-                      const SizedBox(width: 9),
-                      IconButton.filledTonal(
-                        onPressed: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.inventoryFilters)),
-                        icon: const Icon(Icons.tune_rounded),
-                      ),
-                    ],
-                  ),
-                  const SectionTitle('Сегодня'),
-                  ...[
-                    ('BN-4829', 'Чёрный рюкзак', 'B-24', Icons.backpack_rounded),
-                    ('BN-4828', 'Серебристый ноутбук', 'A-11', Icons.laptop_mac_rounded),
-                    ('BN-4827', 'Связка ключей', 'C-07', Icons.key_rounded),
-                  ].map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: SettingRow(
-                        icon: item.$4,
-                        title: item.$2,
-                        subtitle: '${item.$1} · ячейка ${item.$3}',
-                        color: BureauColors.green,
-                        background: BureauColors.greenSoft,
-                        trailing: const BureauPill('НА ХРАНЕНИИ', color: BureauColors.green, background: BureauColors.greenSoft),
-                        onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.record)),
-                      ),
+                  Expanded(
+                    child: MetricCard(
+                      value: '${data['active_inventory']}',
+                      label: 'на хранении',
+                      color: BureauColors.green,
                     ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.media)),
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Добавить вещь вручную'),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: MetricCard(
+                      value: '${data['open_claims']}',
+                      label: 'открытых заявлений',
+                    ),
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: MetricCard(
+                      value: '${data['returned_30d']}',
+                      label: 'возвращено за 30 дней',
+                      color: BureauColors.green,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: MetricCard(
+                      value: data['median_return_hours']?.toString() ?? '—',
+                      label: 'медиана, часов',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SectionTitle('Быстрые действия'),
+        SettingRow(
+          icon: Icons.add_a_photo_outlined,
+          title: 'Принять новую находку',
+          subtitle: 'Фото → описание → ячейка',
+          color: BureauColors.green,
+          background: BureauColors.greenSoft,
+          onTap: () => pushPage(
+            context,
+            CreateFlowPage(
+              initialFound: true,
+              organizationId: widget.organization['id'].toString(),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ClaimsView extends StatelessWidget {
-  const _ClaimsView();
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _OrgHeader('Очередь заявлений', subtitle: '17 новых · SLA 94%'),
-            const SizedBox(height: 20),
-            const Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                BureauPill('Новые · 17', color: BureauColors.green, background: BureauColors.greenSoft),
-                BureauPill('В работе · 8', color: BureauColors.slate, background: Colors.white),
-                BureauPill('Риск · 2', color: BureauColors.red, background: BureauColors.redSoft),
-              ],
-            ),
-            const SectionTitle('Сначала лучшие совпадения'),
-            ...[
-              ('Анна С.', 'Рюкзак BN-4829', '93%', BureauColors.green),
-              ('Илья К.', 'Ноутбук BN-4828', '86%', BureauColors.green),
-              ('Мария П.', 'Часы BN-4791', '74%', BureauColors.amber),
-            ].map(
-              (claim) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: SettingRow(
-                  icon: Icons.person_search_outlined,
-                  title: claim.$1,
-                  subtitle: claim.$2,
-                  color: claim.$4,
-                  background: claim.$4 == BureauColors.green ? BureauColors.greenSoft : BureauColors.amberSoft,
-                  trailing: BureauPill(claim.$3, color: claim.$4, background: claim.$4 == BureauColors.green ? BureauColors.greenSoft : BureauColors.amberSoft),
-                  onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.claimDetail)),
-                ),
-              ),
-            ),
-          ],
         ),
-      ),
-    );
-  }
+        const SizedBox(height: 10),
+        SettingRow(
+          icon: Icons.qr_code_scanner_rounded,
+          title: 'Сканировать QR передачи',
+          subtitle: 'Подтвердить выдачу',
+          color: BureauColors.green,
+          background: BureauColors.greenSoft,
+          onTap: () => pushPage(
+            context,
+            OrganizationQrScanPage(organization: widget.organization),
+          ),
+        ),
+        const SizedBox(height: 10),
+        SettingRow(
+          icon: Icons.upload_file_rounded,
+          title: 'Массовый импорт',
+          subtitle: 'JSON/CSV из учётной системы',
+          onTap: () => pushPage(
+            context,
+            OrganizationBulkImportPage(organization: widget.organization),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
-class _TeamView extends StatelessWidget {
-  const _TeamView();
-
+class OrgInventoryPage extends StatefulWidget {
+  const OrgInventoryPage({super.key, required this.organization});
+  final JsonMap organization;
   @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _OrgHeader('Команда и филиалы', subtitle: '12 сотрудников · 3 точки'),
-            const SectionTitle('Сейчас на смене'),
-            ...const [
-              ('МК', 'Мария Козлова', 'Администратор'),
-              ('АС', 'Алексей Смирнов', 'Оператор склада'),
-              ('НИ', 'Наталья Иванова', 'Выдача'),
-            ].map(
-              (person) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: SoftCard(
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: BureauColors.greenSoft,
-                        child: Text(person.$1, style: const TextStyle(color: BureauColors.green, fontWeight: FontWeight.w900)),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(person.$2, style: const TextStyle(fontWeight: FontWeight.w800)),
-                            Text(person.$3, style: const TextStyle(color: BureauColors.slate, fontSize: 10)),
-                          ],
+  State<OrgInventoryPage> createState() => _OrgInventoryPageState();
+}
+
+class _OrgInventoryPageState extends State<OrgInventoryPage> {
+  String? _status;
+  late Future<List<JsonMap>> _future;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reload();
+  }
+
+  void _reload() => _future = AppScope.of(
+    context,
+    listen: false,
+  ).api.inventory(widget.organization['id'].toString(), status: _status);
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+          child: Column(
+            children: [
+              _OrgHeader('Инвентарь', widget.organization),
+              const SizedBox(height: 14),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'active', label: Text('Активные')),
+                  ButtonSegment(value: 'draft', label: Text('Черновики')),
+                  ButtonSegment(value: 'closed', label: Text('Закрытые')),
+                ],
+                selected: _status == null ? <String>{} : {_status!},
+                emptySelectionAllowed: true,
+                onSelectionChanged: (value) {
+                  setState(() {
+                    _status = value.firstOrNull;
+                    _reload();
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+            children: [
+              ApiFutureBuilder<List<JsonMap>>(
+                future: _future,
+                empty: const NoticeCard('В выбранном статусе вещей нет.'),
+                builder: (context, items) => Column(
+                  children: [
+                    for (final item in items) ...[
+                      SettingRow(
+                        icon: Icons.inventory_2_outlined,
+                        title: item['title']?.toString() ?? '',
+                        subtitle:
+                            '${item['storage_code'] ?? 'Без ячейки'} · ${item['status']}',
+                        color: BureauColors.green,
+                        background: BureauColors.greenSoft,
+                        onTap: () => pushPage(
+                          context,
+                          OrganizationRecordPage(
+                            organization: widget.organization,
+                            listing: item,
+                          ),
                         ),
                       ),
-                      const BureauPill('ОНЛАЙН', color: BureauColors.green, background: BureauColors.greenSoft),
+                      const SizedBox(height: 10),
                     ],
-                  ),
+                  ],
                 ),
               ),
-            ),
-            const SectionTitle('Управление'),
-            const SettingRow(icon: Icons.manage_accounts_outlined, title: 'Роли и права', subtitle: '3 группы доступа'),
-            const SizedBox(height: 10),
-            SettingRow(
-              icon: Icons.account_tree_outlined,
-              title: 'Филиалы',
-              subtitle: '3 точки в единой сети',
-              color: BureauColors.green,
-              background: BureauColors.greenSoft,
-              onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.branches)),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
 
-class _AnalyticsView extends StatelessWidget {
-  const _AnalyticsView();
-
+class OrganizationRecordPage extends StatefulWidget {
+  const OrganizationRecordPage({
+    super.key,
+    required this.organization,
+    required this.listing,
+  });
+  final JsonMap organization;
+  final JsonMap listing;
   @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _OrgHeader('Аналитика возвратов', subtitle: '1–31 июля'),
-            const SizedBox(height: 20),
-            const Row(
-              children: [
-                Expanded(child: MetricCard(value: '214', label: 'принято вещей')),
-                SizedBox(width: 10),
-                Expanded(child: MetricCard(value: '68%', label: 'возвращено', color: BureauColors.green)),
-              ],
-            ),
-            const SectionTitle('Динамика'),
-            const _BarChart(color: BureauColors.green),
-            const SectionTitle('По категориям'),
-            ...const [
-              ('Документы', '72', '82%'),
-              ('Электроника', '46', '74%'),
-              ('Сумки', '38', '61%'),
-            ].map(
-              (row) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: SoftCard(
-                  child: Row(
-                    children: [
-                      Expanded(child: Text(row.$1, style: const TextStyle(fontWeight: FontWeight.w800))),
-                      Text('${row.$2} найдено', style: const TextStyle(color: BureauColors.slate, fontSize: 10)),
-                      const SizedBox(width: 16),
-                      BureauPill(row.$3, color: BureauColors.green, background: BureauColors.greenSoft),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SectionTitle('Настройки'),
-            SettingRow(
-              icon: Icons.settings_outlined,
-              title: 'Настройки и API',
-              subtitle: 'Интеграции, вебхуки и безопасность',
-              onTap: () => pushPage(context, const OrganizationDetailPage(type: OrgDetailType.settings)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  State<OrganizationRecordPage> createState() => _OrganizationRecordPageState();
 }
 
-class _BarChart extends StatelessWidget {
-  const _BarChart({required this.color});
+class _OrganizationRecordPageState extends State<OrganizationRecordPage> {
+  late final TextEditingController _storage = TextEditingController(
+    text: widget.listing['storage_code']?.toString(),
+  );
+  String? _status;
+  @override
+  Widget build(BuildContext context) => BureauPage(
+    title: widget.listing['title']?.toString() ?? 'Карточка вещи',
+    subtitle: widget.listing['id']?.toString() ?? '',
+    bottom: ApiButton(
+      label: 'Сохранить карточку',
+      backgroundColor: BureauColors.green,
+      onPressed: () async {
+        await AppScope.of(
+          context,
+          listen: false,
+        ).api.updateListing(widget.listing['id'].toString(), {
+          'storage_code': _storage.text.trim().isEmpty
+              ? null
+              : _storage.text.trim(),
+          if (_status != null) 'status': _status,
+        });
+        if (!context.mounted) return;
+        Navigator.pop(context);
+      },
+    ),
+    child: Column(
+      children: [
+        const ItemArtwork(
+          height: 220,
+          color: BureauColors.green,
+          background: BureauColors.greenSoft,
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _storage,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.inventory_2_outlined),
+            labelText: 'Ячейка хранения',
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: widget.listing['status']?.toString(),
+          items: const ['draft', 'active', 'paused', 'closed']
+              .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+              .toList(),
+          onChanged: (value) => _status = value,
+          decoration: const InputDecoration(labelText: 'Статус'),
+        ),
+        const SizedBox(height: 14),
+        SettingRow(
+          icon: Icons.location_on_outlined,
+          title: widget.listing['public_region']?.toString() ?? '',
+          subtitle: widget.listing['category']?.toString() ?? '',
+        ),
+      ],
+    ),
+  );
+}
 
-  final Color color;
+class OrgClaimsPage extends StatefulWidget {
+  const OrgClaimsPage({super.key, required this.organization});
+  final JsonMap organization;
+  @override
+  State<OrgClaimsPage> createState() => _OrgClaimsPageState();
+}
+
+class _OrgClaimsPageState extends State<OrgClaimsPage> {
+  late Future<List<JsonMap>> _future;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _future = AppScope.of(
+      context,
+      listen: false,
+    ).api.organizationClaims(widget.organization['id'].toString());
+  }
 
   @override
-  Widget build(BuildContext context) {
-    const values = [42.0, 66.0, 54.0, 83.0, 71.0, 94.0, 106.0];
-    return SoftCard(
-      child: SizedBox(
-        height: 150,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: values
-              .map(
-                (value) => Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    child: Container(
-                      height: value,
-                      decoration: BoxDecoration(color: color, borderRadius: const BorderRadius.vertical(top: Radius.circular(8))),
+  Widget build(BuildContext context) => SafeArea(
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+      children: [
+        _OrgHeader('Очередь заявлений', widget.organization),
+        const SizedBox(height: 18),
+        ApiFutureBuilder<List<JsonMap>>(
+          future: _future,
+          empty: const NoticeCard('Заявлений пока нет.'),
+          builder: (context, claims) => Column(
+            children: [
+              for (final claim in claims) ...[
+                SettingRow(
+                  icon: Icons.fact_check_outlined,
+                  title: 'Заявление ${claim['id'].toString().substring(0, 8)}',
+                  subtitle:
+                      '${claim['status']} · риск ${(((claim['risk_score'] as num?) ?? 0) * 100).round()}%',
+                  color: claim['status'] == 'approved'
+                      ? BureauColors.green
+                      : BureauColors.amber,
+                  background: claim['status'] == 'approved'
+                      ? BureauColors.greenSoft
+                      : BureauColors.amberSoft,
+                  onTap: () => pushPage(
+                    context,
+                    OrganizationClaimPage(
+                      organization: widget.organization,
+                      claim: claim,
                     ),
                   ),
                 ),
-              )
-              .toList(),
-        ),
-      ),
-    );
-  }
-}
-
-enum OrgDetailType {
-  scanner,
-  media,
-  details,
-  storage,
-  inventoryFilters,
-  record,
-  claimDetail,
-  chat,
-  approve,
-  qr,
-  bulk,
-  branches,
-  settings,
-}
-
-class OrganizationDetailPage extends StatelessWidget {
-  const OrganizationDetailPage({super.key, required this.type});
-
-  final OrgDetailType type;
-
-  String get title => switch (type) {
-        OrgDetailType.scanner => 'Приём находки',
-        OrgDetailType.media => 'Новая вещь — медиа',
-        OrgDetailType.details => 'Описание вещи',
-        OrgDetailType.storage => 'Место хранения',
-        OrgDetailType.inventoryFilters => 'Фильтры инвентаря',
-        OrgDetailType.record => 'Карточка вещи',
-        OrgDetailType.claimDetail => 'Проверка владельца',
-        OrgDetailType.chat => 'Защищённый чат',
-        OrgDetailType.approve => 'Одобрить владельца',
-        OrgDetailType.qr => 'Выдача по QR',
-        OrgDetailType.bulk => 'Массовый импорт',
-        OrgDetailType.branches => 'Филиалы',
-        OrgDetailType.settings => 'Настройки и API',
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    return BureauPage(
-      title: title,
-      subtitle: 'ТЦ «Галерея» · защищённый контур',
-      bottom: FilledButton(
-        style: FilledButton.styleFrom(backgroundColor: BureauColors.green),
-        onPressed: () => _next(context),
-        child: Text(_button),
-      ),
-      child: _content(context),
-    );
-  }
-
-  String get _button => switch (type) {
-        OrgDetailType.scanner => 'Продолжить приёмку',
-        OrgDetailType.media => 'Создать описание с ИИ',
-        OrgDetailType.details => 'Выбрать ячейку',
-        OrgDetailType.storage => 'Сохранить вещь',
-        OrgDetailType.inventoryFilters => 'Показать 148 вещей',
-        OrgDetailType.record => 'Открыть заявления',
-        OrgDetailType.claimDetail => 'Открыть чат',
-        OrgDetailType.chat => 'Одобрить владельца',
-        OrgDetailType.approve => 'Одобрить и продолжить',
-        OrgDetailType.qr => 'Подтвердить выдачу',
-        OrgDetailType.bulk => 'Загрузить файл',
-        OrgDetailType.branches => 'Добавить филиал',
-        OrgDetailType.settings => 'Сохранить настройки',
-      };
-
-  void _next(BuildContext context) {
-    final next = switch (type) {
-      OrgDetailType.scanner => OrgDetailType.media,
-      OrgDetailType.media => OrgDetailType.details,
-      OrgDetailType.details => OrgDetailType.storage,
-      OrgDetailType.record => OrgDetailType.claimDetail,
-      OrgDetailType.claimDetail => OrgDetailType.chat,
-      OrgDetailType.chat => OrgDetailType.approve,
-      OrgDetailType.approve => OrgDetailType.qr,
-      _ => null,
-    };
-    if (next == null) {
-      Navigator.pop(context);
-    } else {
-      pushPage(context, OrganizationDetailPage(type: next));
-    }
-  }
-
-  Widget _content(BuildContext context) {
-    return switch (type) {
-      OrgDetailType.scanner => _scanner(context),
-      OrgDetailType.media => _media(context),
-      OrgDetailType.details => _details(context),
-      OrgDetailType.storage => _storage(context),
-      OrgDetailType.inventoryFilters => _filters(context),
-      OrgDetailType.record => _record(context),
-      OrgDetailType.claimDetail => _claim(context),
-      OrgDetailType.chat => _chat(context),
-      OrgDetailType.approve => _approve(context),
-      OrgDetailType.qr => _qr(context),
-      OrgDetailType.bulk => _bulk(context),
-      OrgDetailType.branches => _branches(context),
-      OrgDetailType.settings => _settings(context),
-    };
-  }
-
-  Widget _scanner(BuildContext context) => Column(
-        children: [
-          Container(
-            height: 330,
-            decoration: BoxDecoration(
-              color: BureauColors.greenSoft,
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: BureauColors.green, width: 1.5),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 210,
-                  height: 210,
-                  decoration: BoxDecoration(border: Border.all(color: BureauColors.green, width: 3), borderRadius: BorderRadius.circular(28)),
-                ),
-                Positioned(left: 55, right: 55, child: Container(height: 3, color: BureauColors.green)),
-                const Positioned(bottom: 24, child: BureauPill('QR ИЛИ ШТРИХКОД', color: BureauColors.green, background: Colors.white)),
+                const SizedBox(height: 10),
               ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          const NoticeCard('Если этикетки нет, создайте новую карточку вручную.'),
-        ],
-      );
-
-  Widget _media(BuildContext context) => const Column(
-        children: [
-          ItemArtwork(height: 260, color: BureauColors.green, background: BureauColors.greenSoft),
-          SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(child: _OrgMediaButton(Icons.add_a_photo_outlined, 'Ещё фото')),
-              SizedBox(width: 10),
-              Expanded(child: _OrgMediaButton(Icons.videocam_outlined, 'Видео')),
             ],
           ),
-          SizedBox(height: 16),
-          NoticeCard('Зафиксируйте состояние вещи и не публикуйте скрытые признаки.'),
-        ],
-      );
+        ),
+      ],
+    ),
+  );
+}
 
-  Widget _details(BuildContext context) => const Column(
-        children: [
-          NoticeCard('ИИ определил категорию, цвет и основные признаки.'),
-          SizedBox(height: 16),
-          TextField(decoration: InputDecoration(hintText: 'Чёрный городской рюкзак')),
-          SizedBox(height: 12),
-          TextField(maxLines: 4, decoration: InputDecoration(hintText: 'Матовый, два отделения, красная молния…')),
-          SizedBox(height: 12),
-          TextField(maxLines: 3, decoration: InputDecoration(prefixIcon: Icon(Icons.lock_outline_rounded), hintText: 'Скрытый признак для проверки')),
-        ],
-      );
+class OrganizationClaimPage extends StatefulWidget {
+  const OrganizationClaimPage({
+    super.key,
+    required this.organization,
+    required this.claim,
+  });
+  final JsonMap organization;
+  final JsonMap claim;
+  @override
+  State<OrganizationClaimPage> createState() => _OrganizationClaimPageState();
+}
 
-  Widget _storage(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const TextField(decoration: InputDecoration(prefixIcon: Icon(Icons.search_rounded), hintText: 'Найти ячейку')),
-          const SectionTitle('Свободные рядом'),
-          ...['B-24', 'B-27', 'C-03'].map(
-            (cell) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: SettingRow(
-                icon: Icons.inventory_2_outlined,
-                title: 'Ячейка $cell',
-                subtitle: 'Секция сумок · средний размер',
-                color: BureauColors.green,
-                background: BureauColors.greenSoft,
-                trailing: cell == 'B-24' ? const BureauPill('ВЫБРАНО', color: BureauColors.green, background: BureauColors.greenSoft) : null,
+class _OrganizationClaimPageState extends State<OrganizationClaimPage> {
+  late JsonMap _claim = widget.claim;
+  final _reason = TextEditingController(
+    text: 'Скрытые признаки и доказательства проверены',
+  );
+  @override
+  Widget build(BuildContext context) => BureauPage(
+    title: 'Проверка владельца',
+    subtitle: 'Статус: ${_claim['status']}',
+    child: Column(
+      children: [
+        SoftCard(
+          color: BureauColors.amberSoft,
+          borderColor: BureauColors.amberSoft,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${((((_claim['risk_score'] as num?) ?? 0) * 100)).round()}%',
+                style: const TextStyle(
+                  color: BureauColors.amber,
+                  fontSize: 30,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  (_claim['risk_factors'] as List? ?? const []).join(', '),
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _reason,
+          maxLines: 3,
+          decoration: const InputDecoration(labelText: 'Комментарий решения'),
+        ),
+        const SizedBox(height: 14),
+        if (['under_review', 'needs_more_info'].contains(_claim['status']))
+          Row(
+            children: [
+              Expanded(
+                child: ApiButton(
+                  label: 'Нужно уточнение',
+                  outlined: true,
+                  onPressed: () async {
+                    _claim = await AppScope.of(context, listen: false).api
+                        .decideClaim(
+                          _claim['id'].toString(),
+                          'needs_more_info',
+                          _reason.text,
+                        );
+                    setState(() {});
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ApiButton(
+                  label: 'Одобрить',
+                  backgroundColor: BureauColors.green,
+                  onPressed: () async {
+                    _claim = await AppScope.of(context, listen: false).api
+                        .decideClaim(
+                          _claim['id'].toString(),
+                          'approved',
+                          _reason.text,
+                        );
+                    setState(() {});
+                  },
+                ),
+              ),
+            ],
+          ),
+        const SizedBox(height: 14),
+        OutlinedButton.icon(
+          onPressed: () => pushPage(
+            context,
+            Scaffold(
+              appBar: AppBar(title: const Text('Защищённый чат')),
+              body: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: ClaimChat(claimId: _claim['id'].toString()),
+                ),
               ),
             ),
           ),
-          const NoticeCard('Внешняя этикетка содержит только служебный ID без персональных данных.'),
-        ],
-      );
+          icon: const Icon(Icons.chat_bubble_outline_rounded),
+          label: const Text('Открыть чат'),
+        ),
+      ],
+    ),
+  );
+}
 
-  Widget _filters(BuildContext context) => const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SectionTitle('Статус'),
-          Wrap(spacing: 8, runSpacing: 8, children: [BureauPill('Все'), BureauPill('На хранении', background: Colors.white), BureauPill('Есть заявление', background: Colors.white)]),
-          SectionTitle('Категория'),
-          Wrap(spacing: 8, runSpacing: 8, children: [BureauPill('Сумки', color: BureauColors.green, background: BureauColors.greenSoft), BureauPill('Документы', background: Colors.white), BureauPill('Электроника', background: Colors.white)]),
-          SectionTitle('Филиал'),
-          TextField(readOnly: true, decoration: InputDecoration(prefixIcon: Icon(Icons.business_outlined), hintText: 'ТЦ «Галерея»')),
-        ],
-      );
+class OrgTeamPage extends StatefulWidget {
+  const OrgTeamPage({super.key, required this.organization});
+  final JsonMap organization;
+  @override
+  State<OrgTeamPage> createState() => _OrgTeamPageState();
+}
 
-  Widget _record(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const ItemArtwork(height: 210, color: BureauColors.green, background: BureauColors.greenSoft),
-          const SizedBox(height: 14),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+class _OrgTeamPageState extends State<OrgTeamPage> {
+  late Future<List<JsonMap>> _future;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reload();
+  }
+
+  void _reload() => _future = AppScope.of(
+    context,
+    listen: false,
+  ).api.team(widget.organization['id'].toString());
+  Future<void> _invite() async {
+    final api = AppScope.of(context, listen: false).api;
+    final phone = TextEditingController(text: '+7');
+    var role = 'operator';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Пригласить сотрудника'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              BureauPill('BN-4829', color: BureauColors.green, background: BureauColors.greenSoft),
-              BureauPill('B-24', color: BureauColors.slate, background: Colors.white),
+              TextField(
+                controller: phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Телефон'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: role,
+                items: const ['manager', 'operator', 'viewer']
+                    .map(
+                      (item) =>
+                          DropdownMenuItem(value: item, child: Text(item)),
+                    )
+                    .toList(),
+                onChanged: (value) =>
+                    setDialogState(() => role = value ?? 'operator'),
+              ),
             ],
           ),
-          const SizedBox(height: 15),
-          Text('Чёрный городской рюкзак', style: Theme.of(context).textTheme.headlineSmall),
-          const SectionTitle('Состояние'),
-          const SettingRow(icon: Icons.inventory_2_outlined, title: 'На хранении', subtitle: 'Принято сегодня · Мария К.'),
-          const SizedBox(height: 10),
-          const SettingRow(
-            icon: Icons.person_search_outlined,
-            title: '3 заявления владельцев',
-            subtitle: 'Лучшее совпадение · 93%',
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Пригласить'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) {
+      phone.dispose();
+      return;
+    }
+    if (ok == true) {
+      await api.inviteMember(
+        widget.organization['id'].toString(),
+        phone.text,
+        role,
+      );
+      setState(_reload);
+    }
+    phone.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+      children: [
+        _OrgHeader(
+          'Команда и роли',
+          widget.organization,
+          actions: [
+            IconButton(
+              onPressed: _invite,
+              icon: const Icon(Icons.person_add_alt_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        ApiFutureBuilder<List<JsonMap>>(
+          future: _future,
+          empty: const NoticeCard('Сотрудников нет.'),
+          builder: (context, members) => Column(
+            children: [
+              for (final member in members) ...[
+                SettingRow(
+                  icon: Icons.person_outline_rounded,
+                  title: member['display_name']?.toString() ?? '',
+                  subtitle: '${member['role']} · ${member['status']}',
+                  color: BureauColors.green,
+                  background: BureauColors.greenSoft,
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: () => pushPage(
+            context,
+            OrganizationBranchesPage(organization: widget.organization),
+          ),
+          icon: const Icon(Icons.storefront_outlined),
+          label: const Text('Филиалы'),
+        ),
+      ],
+    ),
+  );
+}
+
+class OrgAnalyticsPage extends StatefulWidget {
+  const OrgAnalyticsPage({super.key, required this.organization});
+  final JsonMap organization;
+  @override
+  State<OrgAnalyticsPage> createState() => _OrgAnalyticsPageState();
+}
+
+class _OrgAnalyticsPageState extends State<OrgAnalyticsPage> {
+  late Future<JsonMap> _future;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _future = AppScope.of(
+      context,
+      listen: false,
+    ).api.organizationAnalytics(widget.organization['id'].toString());
+  }
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+      children: [
+        _OrgHeader('Аналитика возвратов', widget.organization),
+        const SizedBox(height: 18),
+        ApiFutureBuilder<JsonMap>(
+          future: _future,
+          builder: (context, data) => Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: MetricCard(
+                      value: '${data['registered']}',
+                      label: 'зарегистрировано',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: MetricCard(
+                      value: '${data['returned']}',
+                      label: 'возвращено',
+                      color: BureauColors.green,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              MetricCard(
+                value: '${data['return_rate']}%',
+                label: 'доля возврата за ${data['period_days']} дней',
+                color: BureauColors.green,
+              ),
+              const SectionTitle('Категории'),
+              for (final category in List<JsonMap>.from(
+                data['categories'] as List,
+              )) ...[
+                SettingRow(
+                  icon: Icons.category_outlined,
+                  title: category['category']?.toString() ?? '',
+                  subtitle: '${category['count']} вещей',
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class OrganizationQrScanPage extends StatefulWidget {
+  const OrganizationQrScanPage({super.key, required this.organization});
+  final JsonMap organization;
+  @override
+  State<OrganizationQrScanPage> createState() => _OrganizationQrScanPageState();
+}
+
+class _OrganizationQrScanPageState extends State<OrganizationQrScanPage> {
+  final _token = TextEditingController();
+  JsonMap? _result;
+  @override
+  Widget build(BuildContext context) => BureauPage(
+    title: 'Выдача по QR',
+    subtitle: widget.organization['name']?.toString() ?? '',
+    bottom: ApiButton(
+      label: 'Подтвердить выдачу',
+      backgroundColor: BureauColors.green,
+      onPressed: () async {
+        _result = await AppScope.of(
+          context,
+          listen: false,
+        ).api.scanHandover(_token.text.trim());
+        setState(() {});
+      },
+    ),
+    child: Column(
+      children: [
+        Container(
+          height: 240,
+          decoration: BoxDecoration(
+            color: BureauColors.greenSoft,
+            borderRadius: BorderRadius.circular(26),
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.qr_code_scanner_rounded,
+              size: 110,
+              color: BureauColors.green,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _token,
+          maxLines: 3,
+          decoration: const InputDecoration(labelText: 'Данные QR-кода'),
+        ),
+        if (_result != null) ...[
+          const SizedBox(height: 14),
+          NoticeCard(
+            _result!['completed_at'] == null
+                ? 'Сторона организации подтверждена. Ожидаем владельца.'
+                : 'Передача завершена.',
             color: BureauColors.green,
             background: BureauColors.greenSoft,
           ),
         ],
-      );
-
-  Widget _claim(BuildContext context) => const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SoftCard(
-            color: BureauColors.greenSoft,
-            borderColor: BureauColors.greenSoft,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('93%', style: TextStyle(color: BureauColors.green, fontSize: 30, fontWeight: FontWeight.w900)), Text('уверенность ИИ', style: TextStyle(color: BureauColors.slate, fontSize: 10))]),
-                BureauPill('НИЗКИЙ РИСК', color: BureauColors.green, background: Colors.white),
-              ],
-            ),
-          ),
-          SectionTitle('Скрытый признак'),
-          SoftCard(child: Text('Зелёный ярлык AK во внутреннем кармане', style: TextStyle(fontWeight: FontWeight.w800))),
-          SectionTitle('Доказательство'),
-          SettingRow(icon: Icons.photo_library_outlined, title: 'Старое фото', subtitle: 'Создано до даты находки', color: BureauColors.green, background: BureauColors.greenSoft),
-          SizedBox(height: 10),
-          SettingRow(icon: Icons.quiz_outlined, title: '3 контрольных ответа', subtitle: 'Все совпадают с карточкой'),
-        ],
-      );
-
-  Widget _chat(BuildContext context) => const Column(
-        children: [
-          NoticeCard('Контакты владельца скрыты до одобрения.'),
-          SizedBox(height: 18),
-          _OrgBubble('Уточните цвет внутренней подкладки.'),
-          SizedBox(height: 10),
-          _OrgBubble('Тёмно-синяя, рядом с ярлыком белая строчка.', outgoing: true),
-          SizedBox(height: 10),
-          _OrgBubble('Совпадает с карточкой приёмки.'),
-          SizedBox(height: 18),
-          TextField(decoration: InputDecoration(hintText: 'Сообщение…', suffixIcon: Icon(Icons.send_rounded, color: BureauColors.green))),
-        ],
-      );
-
-  Widget _approve(BuildContext context) => Column(
-        children: [
-          Container(
-            width: 130,
-            height: 130,
-            decoration: const BoxDecoration(color: BureauColors.greenSoft, shape: BoxShape.circle),
-            child: const Icon(Icons.verified_rounded, color: BureauColors.green, size: 65),
-          ),
-          const SizedBox(height: 22),
-          Text('Данных достаточно', style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 18),
-          ...const ['Скрытый признак совпал', 'Старое фото подтверждено', 'Риск мошенничества низкий'].map(
-            (item) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: SettingRow(icon: Icons.check_rounded, title: item, subtitle: 'Проверено системой и сотрудником', color: BureauColors.green, background: BureauColors.greenSoft, trailing: const Icon(Icons.verified_rounded, color: BureauColors.green)),
-            ),
-          ),
-          const NoticeCard('После одобрения стороны выберут способ передачи.'),
-        ],
-      );
-
-  Widget _qr(BuildContext context) => Column(
-        children: [
-          Container(
-            height: 310,
-            decoration: BoxDecoration(color: BureauColors.greenSoft, borderRadius: BorderRadius.circular(26)),
-            child: Center(
-              child: Container(
-                width: 210,
-                height: 210,
-                decoration: BoxDecoration(border: Border.all(color: BureauColors.green, width: 4), borderRadius: BorderRadius.circular(28)),
-                child: const Icon(Icons.qr_code_scanner_rounded, color: BureauColors.green, size: 100),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          const SettingRow(icon: Icons.inventory_2_outlined, title: 'Ячейка B-24', subtitle: 'Рюкзак · BN-4829', trailing: BureauPill('ГОТОВО', color: BureauColors.green, background: BureauColors.greenSoft)),
-        ],
-      );
-
-  Widget _bulk(BuildContext context) => const Column(
-        children: [
-          SoftCard(
-            color: BureauColors.greenSoft,
-            borderColor: BureauColors.greenSoft,
-            padding: EdgeInsets.symmetric(vertical: 50, horizontal: 20),
-            child: Column(children: [Icon(Icons.upload_file_rounded, color: BureauColors.green, size: 54), SizedBox(height: 12), Text('Перетащите CSV или XLSX', style: TextStyle(fontWeight: FontWeight.w900)), SizedBox(height: 5), Text('до 10 000 записей · 50 МБ', style: TextStyle(color: BureauColors.slate, fontSize: 10))]),
-          ),
-          SizedBox(height: 14),
-          NoticeCard('Поля: название, категория, дата, филиал, ячейка и служебный ID.'),
-        ],
-      );
-
-  Widget _branches(BuildContext context) => Column(
-        children: [
-          Container(
-            height: 230,
-            decoration: BoxDecoration(color: const Color(0xFFE9EEF4), borderRadius: BorderRadius.circular(24)),
-            child: const Stack(children: [Positioned(left: 65, top: 60, child: _BranchPin('84')), Positioned(right: 65, top: 100, child: _BranchPin('41')), Positioned(left: 155, bottom: 35, child: _BranchPin('23'))]),
-          ),
-          const SectionTitle('Точки'),
-          ...const [('ТЦ «Галерея»', '84 вещи · SLA 92%'), ('ТЦ «Невский центр»', '41 вещь · SLA 96%'), ('Пункт «Сенная»', '23 вещи · SLA 88%')].map(
-            (row) => Padding(padding: const EdgeInsets.only(bottom: 10), child: SettingRow(icon: Icons.storefront_outlined, title: row.$1, subtitle: row.$2, color: BureauColors.green, background: BureauColors.greenSoft)),
-          ),
-        ],
-      );
-
-  Widget _settings(BuildContext context) => const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SectionTitle('Интеграции'),
-          SettingRow(icon: Icons.api_rounded, title: 'API Бюро находок', subtitle: 'Подключено · v2', color: BureauColors.green, background: BureauColors.greenSoft, trailing: BureauPill('АКТИВНО', color: BureauColors.green, background: BureauColors.greenSoft)),
-          SizedBox(height: 10),
-          SettingRow(icon: Icons.print_outlined, title: 'Печать этикеток', subtitle: 'Zebra ZD421'),
-          SizedBox(height: 10),
-          SettingRow(icon: Icons.sync_alt_rounded, title: 'Вебхуки', subtitle: '3 активных события'),
-          SectionTitle('Безопасность'),
-          SettingRow(icon: Icons.security_rounded, title: 'Двухфакторный вход', subtitle: 'Обязателен для администраторов', trailing: BureauPill('ВКЛ', color: BureauColors.green, background: BureauColors.greenSoft)),
-          SizedBox(height: 10),
-          SettingRow(icon: Icons.history_rounded, title: 'Журнал действий', subtitle: 'Хранение 365 дней'),
-        ],
-      );
+      ],
+    ),
+  );
 }
 
-class _OrgMediaButton extends StatelessWidget {
-  const _OrgMediaButton(this.icon, this.label);
-
-  final IconData icon;
-  final String label;
-
+class OrganizationBulkImportPage extends StatefulWidget {
+  const OrganizationBulkImportPage({super.key, required this.organization});
+  final JsonMap organization;
   @override
-  Widget build(BuildContext context) {
-    return SoftCard(
-      child: Column(children: [Icon(icon, color: BureauColors.green), const SizedBox(height: 7), Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800))]),
-    );
-  }
+  State<OrganizationBulkImportPage> createState() =>
+      _OrganizationBulkImportPageState();
 }
 
-class _OrgBubble extends StatelessWidget {
-  const _OrgBubble(this.text, {this.outgoing = false});
-
-  final String text;
-  final bool outgoing;
-
+class _OrganizationBulkImportPageState
+    extends State<OrganizationBulkImportPage> {
+  final _json = TextEditingController(
+    text:
+        '[\n  {"title":"Зонт","description":"Чёрный складной зонт","category":"Аксессуары","tags":["чёрный"],"event_at":"${DateTime.now().toUtc().toIso8601String()}","region":"Санкт-Петербург","storage_code":"A-01","branch_id":null}\n]',
+  );
+  JsonMap? _result;
   @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 300),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: outgoing ? BureauColors.green : Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: outgoing ? null : Border.all(color: BureauColors.line),
+  Widget build(BuildContext context) => BureauPage(
+    title: 'Массовый импорт',
+    subtitle: 'До 1000 записей за запрос',
+    bottom: ApiButton(
+      label: 'Импортировать',
+      backgroundColor: BureauColors.green,
+      onPressed: () async {
+        final decoded = jsonDecode(_json.text) as List;
+        _result = await AppScope.of(context, listen: false).api.bulkImport(
+          widget.organization['id'].toString(),
+          decoded
+              .map((item) => Map<String, dynamic>.from(item as Map))
+              .toList(),
+        );
+        setState(() {});
+      },
+    ),
+    child: Column(
+      children: [
+        TextField(
+          controller: _json,
+          maxLines: 16,
+          decoration: const InputDecoration(
+            labelText: 'JSON-массив записей',
+            alignLabelWithHint: true,
+          ),
         ),
-        child: Text(text, style: TextStyle(color: outgoing ? Colors.white : BureauColors.navy, fontSize: 12, height: 1.4)),
+        if (_result != null) ...[
+          const SizedBox(height: 14),
+          NoticeCard(
+            'Обработано ${_result!['processed']} из ${_result!['total']}. Статус: ${_result!['status']}',
+            color: BureauColors.green,
+            background: BureauColors.greenSoft,
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+class OrganizationBranchesPage extends StatefulWidget {
+  const OrganizationBranchesPage({super.key, required this.organization});
+  final JsonMap organization;
+  @override
+  State<OrganizationBranchesPage> createState() =>
+      _OrganizationBranchesPageState();
+}
+
+class _OrganizationBranchesPageState extends State<OrganizationBranchesPage> {
+  late Future<List<JsonMap>> _future;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reload();
+  }
+
+  void _reload() => _future = AppScope.of(
+    context,
+    listen: false,
+  ).api.branches(widget.organization['id'].toString());
+  Future<void> _add() async {
+    final api = AppScope.of(context, listen: false).api;
+    final name = TextEditingController();
+    final address = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Новый филиал'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: name,
+              decoration: const InputDecoration(labelText: 'Название'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: address,
+              decoration: const InputDecoration(labelText: 'Публичный адрес'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Добавить'),
+          ),
+        ],
       ),
     );
+    if (!mounted) {
+      name.dispose();
+      address.dispose();
+      return;
+    }
+    if (ok == true) {
+      await api.createBranch(widget.organization['id'].toString(), {
+        'name': name.text,
+        'public_address': address.text,
+        'exact_location': null,
+        'timezone': 'Europe/Moscow',
+      });
+      setState(_reload);
+    }
+    name.dispose();
+    address.dispose();
   }
-}
-
-class _BranchPin extends StatelessWidget {
-  const _BranchPin(this.label);
-
-  final String label;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 50,
-      height: 50,
-      decoration: BoxDecoration(color: BureauColors.green, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4)),
-      child: Center(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900))),
-    );
+  Widget build(BuildContext context) => BureauPage(
+    title: 'Филиалы',
+    subtitle: widget.organization['name']?.toString() ?? '',
+    actions: [IconButton(onPressed: _add, icon: const Icon(Icons.add_rounded))],
+    child: ApiFutureBuilder<List<JsonMap>>(
+      future: _future,
+      empty: const NoticeCard('Филиалов пока нет.'),
+      builder: (context, items) => Column(
+        children: [
+          for (final item in items) ...[
+            SettingRow(
+              icon: Icons.storefront_outlined,
+              title: item['name']?.toString() ?? '',
+              subtitle:
+                  '${item['public_address']} · ${item['active'] == true ? 'активен' : 'выключен'}',
+              color: BureauColors.green,
+              background: BureauColors.greenSoft,
+            ),
+            const SizedBox(height: 10),
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
+class OrganizationSettingsPage extends StatefulWidget {
+  const OrganizationSettingsPage({super.key, required this.organization});
+  final JsonMap organization;
+  @override
+  State<OrganizationSettingsPage> createState() =>
+      _OrganizationSettingsPageState();
+}
+
+class _OrganizationSettingsPageState extends State<OrganizationSettingsPage> {
+  late bool _enabled = widget.organization['api_enabled'] == true;
+  late Future<List<dynamic>> _future;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reload();
   }
+
+  void _reload() {
+    final api = AppScope.of(context, listen: false).api;
+    final id = widget.organization['id'].toString();
+    _future = Future.wait([api.apiKeys(id), api.webhooks(id)]);
+  }
+
+  Future<void> _createKey() async {
+    final value = await AppScope.of(context, listen: false).api.createApiKey(
+      widget.organization['id'].toString(),
+      'Mobile integration',
+      ['inventory:read', 'inventory:write', 'claims:read'],
+    );
+    if (mounted) {
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Сохраните ключ сейчас'),
+          content: SelectableText(value['api_key']?.toString() ?? ''),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Готово'),
+            ),
+          ],
+        ),
+      );
+      setState(_reload);
+    }
+  }
+
+  Future<void> _createWebhook() async {
+    final api = AppScope.of(context, listen: false).api;
+    final url = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Новый вебхук'),
+        content: TextField(
+          controller: url,
+          decoration: const InputDecoration(labelText: 'HTTPS URL'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Создать'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) {
+      url.dispose();
+      return;
+    }
+    if (ok == true) {
+      final result = await api.createWebhook(
+        widget.organization['id'].toString(),
+        'Mobile webhook',
+        url.text,
+        ['listing.created', 'claim.submitted', 'handover.completed'],
+      );
+      if (mounted) {
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Секрет подписи'),
+            content: SelectableText(result['signing_secret']?.toString() ?? ''),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Готово'),
+              ),
+            ],
+          ),
+        );
+        setState(_reload);
+      }
+    }
+    url.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => BureauPage(
+    title: 'Настройки и API',
+    subtitle: widget.organization['name']?.toString() ?? '',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SwitchListTile(
+          value: _enabled,
+          title: const Text('Разрешить API'),
+          subtitle: const Text('Только для подтверждённой организации'),
+          onChanged: (value) async {
+            final result = await AppScope.of(context, listen: false).api
+                .updateOrganizationSettings(
+                  widget.organization['id'].toString(),
+                  value,
+                );
+            setState(() => _enabled = result['api_enabled'] == true);
+          },
+        ),
+        ApiFutureBuilder<List<dynamic>>(
+          future: _future,
+          builder: (context, data) {
+            final keys = data[0] as List<JsonMap>;
+            final hooks = data[1] as List<JsonMap>;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionTitle('API-ключи'),
+                for (final key in keys) ...[
+                  SettingRow(
+                    icon: Icons.key_rounded,
+                    title: key['name']?.toString() ?? '',
+                    subtitle: '${key['key_prefix']} · ${key['status']}',
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                OutlinedButton.icon(
+                  onPressed: _enabled ? _createKey : null,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Создать API-ключ'),
+                ),
+                const SectionTitle('Вебхуки'),
+                for (final hook in hooks) ...[
+                  SettingRow(
+                    icon: Icons.webhook_rounded,
+                    title: hook['name']?.toString() ?? '',
+                    subtitle: '${hook['url']} · ${hook['status']}',
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                OutlinedButton.icon(
+                  onPressed: _createWebhook,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Добавить вебхук'),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    ),
+  );
 }

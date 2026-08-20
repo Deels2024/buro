@@ -62,11 +62,12 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - run: flutter build web --release --dart-define=BUREAU_API_URL=https://edinburo.ru/v1
       - run: node tool/validate_project.js
 
   stack:
     runs-on: ubuntu-latest
-    needs: [backend, admin]
+    needs: [backend, admin, flutter]
     steps:
       - uses: actions/checkout@v4
       - name: Install and smoke-test the Docker stack

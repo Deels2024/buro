@@ -6,9 +6,10 @@
 - PostgreSQL + pgvector;
 - Redis;
 - MinIO для фотографий и файлов;
-- веб-админка, подключённая к реальным API;
+- пользовательский Flutter Web, подключённый к реальным API;
+- отдельная веб-админка, подключённая к реальным API;
 - Nginx как единая точка входа;
-- Flutter UI-прототип на 67 экранов и готовый API-клиент;
+- Flutter-приложение на 67 экранов с готовым API-клиентом;
 - OpenAPI-контракт, миграции и начальные данные.
 
 ## Запуск одной командой
@@ -31,13 +32,17 @@ chmod +x install.sh scripts/check.sh
 7. дождётся готовности сервисов и в режиме development выполнит сквозную
    проверку входа администратора и доступа к dashboard API.
 
-После запуска:
+После запуска в production:
 
-- админка: `http://localhost`;
-- API: `http://localhost/v1`;
-- Swagger: `http://localhost/docs`;
+- пользовательский сайт: `https://edinburo.ru`;
+- админка: `https://admin.edinburo.ru`;
+- API: `https://edinburo.ru/v1`;
+- Swagger: `https://edinburo.ru/docs`;
 - MinIO API: `http://localhost:9000`;
 - MinIO Console: `http://localhost:9001`.
+
+В локальной среде те же контуры выбираются по заголовку `Host`: основной
+домен обслуживает Flutter Web, а `admin.edinburo.ru` — Next.js-админку.
 
 Телефон первого администратора задаётся в `.env` переменной
 `BN_BOOTSTRAP_ADMIN_PHONE`. В режиме `development` SMS не отправляется:
@@ -66,7 +71,7 @@ chmod +x install.sh scripts/check.sh
 Access и refresh tokens хранятся только в HttpOnly cookies и недоступны
 JavaScript-коду браузера.
 
-## Мобильное приложение
+## Пользовательский сайт и мобильное приложение
 
 Исходники находятся в папке `flutter/`. Адрес API передаётся при сборке:
 
@@ -80,14 +85,15 @@ flutter run --dart-define=BUREAU_API_URL=http://10.0.2.2/v1
 flutter run --dart-define=BUREAU_API_URL=https://api.example.ru/v1
 ```
 
-Полный OpenAPI-контракт находится в `backend/openapi.json`, готовый Flutter
-клиент — в `flutter/lib/data/bureau_api_client.dart`.
+Полный OpenAPI-контракт находится в `backend/openapi.json`, Flutter-клиент — в
+`flutter/lib/data/bureau_api_client.dart`, а карта 67 экранов к маршрутам — в
+`flutter/lib/data/screen_catalog.dart`.
 
-Важно: мобильная часть сейчас является кликабельным UI-прототипом. API-клиент
-добавлен, но ещё не внедрён в состояние и действия 67 экранов. Перед выпуском в
-App Store и Google Play необходимо подключить экраны к клиенту, добавить
-`flutter_secure_storage`, сгенерировать платформенные папки и пройти реальные
-Android/iOS сборки. Backend и веб-админка от этого ограничения не зависят.
+Flutter Web собирается отдельным Docker-контейнером и публикуется на главном
+домене. В web-интерфейсе скрыты внутренний каталог разработки и кабинет
+модератора: административная работа выполняется только на отдельном домене.
+Для App Store и Google Play остаётся настроить подписи, разрешения камеры и
+галереи, push FCM/APNs и выполнить device-тесты на production-домене.
 
 ## Автоматическая проверка
 
@@ -104,15 +110,17 @@ cd ../flutter && node tool/validate_project.js
 
 Перед публичным запуском измените `.env`:
 
-1. `PUBLIC_BASE_URL=https://ваш-домен.ru`;
-2. `S3_PUBLIC_URL=https://файлы.ваш-домен.ru`;
-3. `BN_ENVIRONMENT=production`;
-4. `ADMIN_COOKIE_SECURE=true`;
-5. заполните параметры SMS-провайдера;
-6. подключите TLS через внешний reverse proxy или ingress;
-7. замените локальный MinIO на объектное хранилище, если это требуется;
-8. настройте резервные копии PostgreSQL и файлов;
-9. проведите security-аудит и проверку требований 152-ФЗ.
+1. `PUBLIC_BASE_URL=https://edinburo.ru`;
+2. `ADMIN_BASE_URL=https://admin.edinburo.ru`;
+3. `S3_PUBLIC_URL=https://файлы.ваш-домен.ru`;
+4. `BN_ENVIRONMENT=production`;
+5. `ADMIN_COOKIE_SECURE=true`;
+6. заполните параметры SMS-провайдера;
+7. направьте DNS-записи `@` и `admin` на production-сервер и выпустите TLS для
+   обоих имён;
+8. замените локальный MinIO на объектное хранилище, если это требуется;
+9. настройте резервные копии PostgreSQL и файлов;
+10. проведите security-аудит и проверку требований 152-ФЗ.
 
 При `BN_ENVIRONMENT=production` backend специально откажется запускаться,
 если обязательные секреты или SMS-провайдер не настроены.
@@ -138,10 +146,11 @@ make ai
 ## Структура
 
 ```text
-backend/              FastAPI, worker, миграции, OpenAPI
-admin/                Next.js веб-админка
-flutter/              мобильное приложение
-nginx/default.conf    единая точка входа
-docker-compose.yml    запуск всего комплекса
-install.sh            установка одной командой
+backend/                 FastAPI, worker, миграции, OpenAPI
+admin/                   Next.js веб-админка
+flutter/                 Android, iOS и пользовательский Flutter Web
+flutter/Dockerfile.web   production-сборка пользовательского сайта
+nginx/default.conf       разделение главного и административного доменов
+docker-compose.yml       запуск всего комплекса
+install.sh               установка одной командой
 ```

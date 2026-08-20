@@ -1,12 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/app_controller.dart';
+import '../../data/bureau_api_client.dart';
+import 'match_flow.dart';
+import 'user_app.dart';
 
 class CreateFlowPage extends StatefulWidget {
-  const CreateFlowPage({super.key, required this.initialFound});
+  const CreateFlowPage({
+    super.key,
+    required this.initialFound,
+    this.organizationId,
+    this.branchId,
+    this.initialStorageCode,
+  });
 
   final bool initialFound;
+  final String? organizationId;
+  final String? branchId;
+  final String? initialStorageCode;
 
   @override
   State<CreateFlowPage> createState() => _CreateFlowPageState();
@@ -15,443 +30,532 @@ class CreateFlowPage extends StatefulWidget {
 class _CreateFlowPageState extends State<CreateFlowPage> {
   int _step = 0;
   late bool _found = widget.initialFound;
+  final _title = TextEditingController();
+  final _description = TextEditingController();
+  final _category = TextEditingController();
+  final _features = TextEditingController();
+  final _hidden = TextEditingController();
+  final _region = TextEditingController();
+  final _address = TextEditingController();
+  late final TextEditingController _storage = TextEditingController(
+    text: widget.initialStorageCode,
+  );
+  DateTime _eventAt = DateTime.now();
+  final List<UploadedMedia> _media = [];
+  final List<XFile> _files = [];
+  bool _uploading = false;
+  bool _describing = false;
 
-  List<String> get _titles => _found
-      ? ['Фото и видео', 'Описание находки', 'Безопасное место', 'Предпросмотр']
-      : ['Фото и видео', 'Описание пропажи', 'Место и время', 'Предпросмотр'];
-
-  void _next() {
-    if (_step == 3) {
-      setState(() => _step = 4);
-      return;
-    }
-    setState(() => _step += 1);
-  }
-
-  void _back() {
-    if (_step == 0) {
-      Navigator.pop(context);
-      return;
-    }
-    setState(() => _step -= 1);
-  }
+  Color get _accent => _found ? BureauColors.green : BureauColors.blue;
+  Color get _soft => _found ? BureauColors.greenSoft : BureauColors.blueSoft;
 
   @override
-  Widget build(BuildContext context) {
-    if (_step == 4) {
-      return _SuccessPage(found: _found);
+  void dispose() {
+    for (final controller in [
+      _title,
+      _description,
+      _category,
+      _features,
+      _hidden,
+      _region,
+      _address,
+      _storage,
+    ]) {
+      controller.dispose();
     }
+    super.dispose();
+  }
 
-    final accent = _found ? BureauColors.green : BureauColors.blue;
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: BureauColors.canvas,
-        surfaceTintColor: Colors.transparent,
-        leading: IconButton(onPressed: _back, icon: const Icon(Icons.arrow_back_rounded)),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(_titles[_step], style: Theme.of(context).textTheme.titleLarge),
-            Text('Шаг ${_step + 1} из 4', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
-          ],
+  Future<void> _pickImages() async {
+    final files = await ImagePicker().pickMultiImage(
+      imageQuality: 88,
+      maxWidth: 2048,
+      limit: 8 - _files.length,
+    );
+    if (files.isEmpty || !mounted) return;
+    setState(() => _uploading = true);
+    final api = AppScope.of(context, listen: false).api;
+    try {
+      for (final file in files) {
+        final bytes = await file.readAsBytes();
+        final mime =
+            file.mimeType ??
+            (file.name.toLowerCase().endsWith('.png')
+                ? 'image/png'
+                : 'image/jpeg');
+        final media = await api.uploadMedia(
+          bytes: bytes,
+          filename: file.name,
+          mimeType: mime,
+          purpose: 'listing',
+        );
+        _files.add(file);
+        _media.add(media);
+      }
+      if (_media.isNotEmpty && _title.text.trim().isEmpty) await _describe();
+    } catch (error) {
+      if (mounted) showApiError(context, error);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _describe() async {
+    if (_media.isEmpty || _describing) return;
+    setState(() => _describing = true);
+    try {
+      final result = await AppScope.of(
+        context,
+        listen: false,
+      ).api.describeMedia(_media.first.id, _found ? 'found' : 'lost');
+      _title.text = result['title']?.toString() ?? _title.text;
+      _description.text =
+          result['description']?.toString() ?? _description.text;
+      _category.text = result['category']?.toString() ?? _category.text;
+      _features.text = (result['distinctive_features'] as List? ?? const [])
+          .join(', ');
+      _hidden.text = (result['sensitive_details_to_hide'] as List? ?? const [])
+          .join(', ');
+      if (mounted) showApiSuccess(context, 'ИИ подготовил описание');
+    } catch (error) {
+      if (mounted) showApiError(context, error);
+    } finally {
+      if (mounted) setState(() => _describing = false);
+    }
+  }
+
+  bool _validateStep() {
+    if (_step == 1 &&
+        (_title.text.trim().length < 3 ||
+            _description.text.trim().length < 10 ||
+            _category.text.trim().length < 2)) {
+      showApiError(
+        context,
+        BureauApiException(
+          422,
+          'Заполните название, категорию и описание не короче 10 символов',
         ),
-      ),
-      body: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            LinearProgressIndicator(
-              value: (_step + 1) / 4,
-              minHeight: 4,
-              backgroundColor: BureauColors.line,
-              color: accent,
-            ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: KeyedSubtree(key: ValueKey(_step), child: _body(context)),
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: BureauColors.line)),
-              ),
-              child: FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: accent),
-                onPressed: _next,
-                child: Text(_step == 3 ? 'Опубликовать' : 'Продолжить'),
-              ),
-            ),
-          ],
-        ),
+      );
+      return false;
+    }
+    if (_step == 2 && _region.text.trim().length < 2) {
+      showApiError(
+        context,
+        BureauApiException(422, 'Укажите регион или город'),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _next() async {
+    if (!_validateStep()) return;
+    if (_step < 3) {
+      setState(() => _step++);
+      return;
+    }
+    await _submit();
+  }
+
+  Future<void> _submit() async {
+    final publish = _media.isNotEmpty;
+    final body = <String, dynamic>{
+      'kind': _found ? 'found' : 'lost',
+      'title': _title.text.trim(),
+      'description': _description.text.trim(),
+      'category': _category.text.trim(),
+      'tags': _split(_features.text),
+      'public_features': _split(_features.text),
+      'hidden_features': _split(_hidden.text),
+      'event_at': _eventAt.toUtc().toIso8601String(),
+      'location': {
+        'region': _region.text.trim(),
+        'latitude': null,
+        'longitude': null,
+        'exact_address': _address.text.trim().isEmpty
+            ? null
+            : _address.text.trim(),
+      },
+      'media_ids': _media.map((item) => item.id).toList(),
+      'organization_id': widget.organizationId,
+      'branch_id': widget.branchId,
+      'storage_code': _storage.text.trim().isEmpty
+          ? null
+          : _storage.text.trim(),
+      'publish': publish,
+    };
+    final listing = await AppScope.of(
+      context,
+      listen: false,
+    ).api.createListing(body);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            PublicationSuccessPage(listing: listing, published: publish),
       ),
     );
   }
 
-  Widget _body(BuildContext context) {
-    switch (_step) {
-      case 0:
-        return _MediaStep(found: _found);
-      case 1:
-        return _DetailsStep(found: _found);
-      case 2:
-        return _LocationStep(found: _found);
-      default:
-        return _PreviewStep(
-          found: _found,
-          onChangeType: () => setState(() => _found = !_found),
-        );
-    }
-  }
-}
-
-class _MediaStep extends StatelessWidget {
-  const _MediaStep({required this.found});
-
-  final bool found;
+  List<String> _split(String value) => value
+      .split(',')
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList();
 
   @override
   Widget build(BuildContext context) {
-    final accent = found ? BureauColors.green : BureauColors.blue;
-    final soft = found ? BureauColors.greenSoft : BureauColors.blueSoft;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          found ? 'Покажите вещь с разных сторон' : 'Добавьте фото потерянной вещи',
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'До 8 фотографий и одно видео до 30 секунд. ИИ поможет заполнить описание.',
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
-        ),
-        const SizedBox(height: 22),
-        Container(
-          height: 300,
-          decoration: BoxDecoration(color: soft, borderRadius: BorderRadius.circular(26)),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add_a_photo_rounded, size: 54, color: accent),
-                const SizedBox(height: 12),
-                Text('Добавить фото', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: accent)),
-                const SizedBox(height: 5),
-                Text('Камера или галерея', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _MediaSlot(icon: Icons.add_rounded, label: 'Ещё фото', color: accent),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _MediaSlot(icon: Icons.videocam_outlined, label: 'Видео', color: accent),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _MediaSlot(icon: Icons.auto_fix_high_rounded, label: 'Улучшить', color: accent),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        NoticeCard(
-          found
-              ? 'Не показывайте серийные номера и уникальные детали — они пригодятся для проверки владельца.'
-              : 'Если старого фото нет, добавьте похожее изображение или пропустите этот шаг.',
-          color: accent,
-          background: soft,
-          icon: Icons.auto_awesome_rounded,
+    final titles = _found
+        ? ['Фото находки', 'Описание находки', 'Место хранения', 'Предпросмотр']
+        : ['Фото пропажи', 'Описание пропажи', 'Место и время', 'Предпросмотр'];
+    return BureauPage(
+      title: titles[_step],
+      subtitle: 'Шаг ${_step + 1} из 4 · ${_found ? 'находка' : 'пропажа'}',
+      actions: [
+        TextButton(
+          onPressed: () => setState(() => _found = !_found),
+          child: Text(_found ? 'Это пропажа' : 'Это находка'),
         ),
       ],
-    );
-  }
-}
-
-class _MediaSlot extends StatelessWidget {
-  const _MediaSlot({required this.icon, required this.label, required this.color});
-
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 88,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: BureauColors.line),
+      bottom: ApiButton(
+        label: _step == 3
+            ? (_media.isEmpty ? 'Сохранить черновик' : 'Опубликовать')
+            : 'Продолжить',
+        backgroundColor: _accent,
+        onPressed: _next,
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(height: 7),
-          Text(label, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 9)),
-        ],
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        child: KeyedSubtree(key: ValueKey(_step), child: _body(context)),
       ),
     );
   }
-}
 
-class _DetailsStep extends StatelessWidget {
-  const _DetailsStep({required this.found});
+  Widget _body(BuildContext context) => switch (_step) {
+    0 => _mediaStep(context),
+    1 => _detailsStep(context),
+    2 => _locationStep(context),
+    _ => _previewStep(context),
+  };
 
-  final bool found;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = found ? BureauColors.green : BureauColors.blue;
-    final soft = found ? BureauColors.greenSoft : BureauColors.blueSoft;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SoftCard(
-          color: soft,
-          borderColor: soft,
-          child: Row(
-            children: [
-              IconTile(icon: Icons.auto_awesome_rounded, color: accent, background: Colors.white),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('ИИ подготовил черновик', style: Theme.of(context).textTheme.titleMedium),
-                    Text('Проверьте описание перед публикацией', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10)),
-                  ],
-                ),
-              ),
-              BureauPill('ГОТОВО', color: accent, background: Colors.white),
-            ],
+  Widget _mediaStep(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        _found
+            ? 'Покажите вещь с разных сторон'
+            : 'Добавьте фото потерянной вещи',
+        style: Theme.of(context).textTheme.headlineSmall,
+      ),
+      const SizedBox(height: 8),
+      Text(
+        'До 8 фотографий. После загрузки ИИ предложит название, категорию и признаки.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
+      ),
+      const SizedBox(height: 22),
+      GestureDetector(
+        onTap: _uploading ? null : _pickImages,
+        child: Container(
+          height: 280,
+          width: double.infinity,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: _soft,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: _accent),
           ),
+          child: _files.isEmpty
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add_a_photo_rounded, size: 54, color: _accent),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Камера или галерея',
+                      style: TextStyle(
+                        color: _accent,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                )
+              : FutureBuilder(
+                  future: _files.first.readAsBytes(),
+                  builder: (context, snapshot) => snapshot.hasData
+                      ? Image.memory(snapshot.data!, fit: BoxFit.cover)
+                      : const Center(child: CircularProgressIndicator()),
+                ),
         ),
-        const SectionTitle('Название'),
-        const TextField(decoration: InputDecoration(hintText: 'Чёрный городской рюкзак')),
-        const SectionTitle('Категория'),
+      ),
+      if (_uploading)
+        const Padding(
+          padding: EdgeInsets.all(18),
+          child: LinearProgressIndicator(),
+        ),
+      if (_files.isNotEmpty) ...[
+        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            BureauPill('Сумки', color: accent, background: soft),
-            const BureauPill('Документы', color: BureauColors.slate, background: Colors.white),
-            const BureauPill('Электроника', color: BureauColors.slate, background: Colors.white),
+            for (var index = 0; index < _files.length; index++)
+              BureauPill(
+                'Фото ${index + 1}',
+                color: _accent,
+                background: _soft,
+              ),
           ],
-        ),
-        const SectionTitle('Описание'),
-        const TextField(
-          maxLines: 5,
-          decoration: InputDecoration(
-            hintText: 'Матовый материал, два отделения, красная молния…',
-            alignLabelWithHint: true,
-          ),
-        ),
-        SectionTitle(found ? 'Скрытая деталь' : 'Особые приметы'),
-        TextField(
-          maxLines: 3,
-          decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.lock_outline_rounded),
-            hintText: found
-                ? 'Например: зелёный ярлык внутри кармана'
-                : 'Например: потёртость на левой лямке',
-          ),
         ),
         const SizedBox(height: 12),
-        NoticeCard(
-          found ? 'Скрытую деталь увидят только сотрудники проверки.' : 'Особые приметы помогают ИИ повысить точность поиска.',
-          color: accent,
-          background: soft,
+        ApiButton(
+          label: _describing ? 'ИИ анализирует…' : 'Обновить описание с ИИ',
+          outlined: true,
+          onPressed: _describe,
         ),
       ],
-    );
-  }
-}
+      const SizedBox(height: 18),
+      NoticeCard(
+        _found
+            ? 'Не показывайте серийные номера публично — добавьте их как скрытый признак.'
+            : 'Если фото нет, запись сохранится как черновик и её можно дополнить позже.',
+        color: _accent,
+        background: _soft,
+        icon: Icons.shield_outlined,
+      ),
+    ],
+  );
 
-class _LocationStep extends StatelessWidget {
-  const _LocationStep({required this.found});
-
-  final bool found;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = found ? BureauColors.green : BureauColors.blue;
-    final soft = found ? BureauColors.greenSoft : BureauColors.blueSoft;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          found ? 'Где вещь находится сейчас?' : 'Где вы видели вещь в последний раз?',
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 16),
-        const TextField(
-          decoration: InputDecoration(prefixIcon: Icon(Icons.location_on_outlined), hintText: 'Москва, Тверской район'),
-        ),
-        const SizedBox(height: 12),
-        Container(
-          height: 260,
-          decoration: BoxDecoration(color: const Color(0xFFE9EEF4), borderRadius: BorderRadius.circular(24)),
-          child: Center(
-            child: Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(color: accent, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4)),
-              child: const Icon(Icons.location_on_rounded, color: Colors.white),
-            ),
-          ),
-        ),
-        const SectionTitle('Дата и время'),
-        const Row(
-          children: [
-            Expanded(child: TextField(readOnly: true, decoration: InputDecoration(prefixIcon: Icon(Icons.calendar_today_outlined), hintText: 'Сегодня'))),
-            SizedBox(width: 10),
-            Expanded(child: TextField(readOnly: true, decoration: InputDecoration(prefixIcon: Icon(Icons.schedule_rounded), hintText: 'Около 14:30'))),
-          ],
-        ),
-        if (found) ...[
-          const SectionTitle('Место хранения'),
-          const SettingRow(
-            icon: Icons.home_work_outlined,
-            title: 'У меня',
-            subtitle: 'Адрес не публикуется',
-            trailing: BureauPill('ВЫБРАНО', color: BureauColors.green, background: BureauColors.greenSoft),
-          ),
-        ],
-        const SizedBox(height: 14),
+  Widget _detailsStep(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (_media.isNotEmpty)
         NoticeCard(
-          'Пользователи увидят только примерный район. Точная точка откроется после подтверждения.',
-          color: accent,
-          background: soft,
+          'ИИ заполнил черновик. Проверьте данные перед продолжением.',
+          color: _accent,
+          background: _soft,
+          icon: Icons.auto_awesome_rounded,
         ),
-      ],
-    );
-  }
-}
-
-class _PreviewStep extends StatelessWidget {
-  const _PreviewStep({required this.found, required this.onChangeType});
-
-  final bool found;
-  final VoidCallback onChangeType;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = found ? BureauColors.green : BureauColors.blue;
-    final soft = found ? BureauColors.greenSoft : BureauColors.blueSoft;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const ItemArtwork(),
-        const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            BureauPill(found ? 'НАХОДКА' : 'ПРОПАЖА', color: accent, background: soft),
-            TextButton(onPressed: onChangeType, child: const Text('Изменить тип')),
-          ],
-        ),
-        Text('Чёрный городской рюкзак', style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 10),
-        Text(
-          'Матовый материал, два отделения, красная молния. Есть скрытая уникальная деталь.',
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
-        ),
-        const SectionTitle('Публикация увидит'),
-        const SettingRow(
-          icon: Icons.location_on_outlined,
-          title: 'Москва · Тверской район',
-          subtitle: 'Точная точка скрыта',
-        ),
-        const SizedBox(height: 10),
-        const SettingRow(
-          icon: Icons.schedule_rounded,
-          title: 'Сегодня · около 14:30',
-          subtitle: 'Время можно уточнить позже',
-        ),
-        const SizedBox(height: 14),
-        NoticeCard(
-          found ? 'Контакты будут скрыты до проверки владельца.' : 'ИИ начнёт искать совпадения сразу после публикации.',
-          color: accent,
-          background: soft,
-        ),
-      ],
-    );
-  }
-}
-
-class _SuccessPage extends StatelessWidget {
-  const _SuccessPage({required this.found});
-
-  final bool found;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = found ? BureauColors.green : BureauColors.blue;
-    final soft = found ? BureauColors.greenSoft : BureauColors.blueSoft;
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const Spacer(),
-              Container(
-                width: 140,
-                height: 140,
-                decoration: BoxDecoration(color: soft, shape: BoxShape.circle),
-                child: Icon(Icons.check_rounded, color: accent, size: 70),
-              ),
-              const SizedBox(height: 30),
-              Text('Публикация создана', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 12),
-              Text(
-                found
-                    ? 'ИИ уже ищет возможного владельца. Мы сообщим о хорошем совпадении.'
-                    : 'ИИ уже сравнивает объявление с находками по всей сети.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
-              ),
-              const SizedBox(height: 24),
-              SoftCard(
-                color: soft,
-                borderColor: soft,
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('ID публикации', style: TextStyle(color: BureauColors.slate, fontSize: 10)),
-                        SizedBox(height: 4),
-                        Text('BN-4829', style: TextStyle(color: BureauColors.navy, fontWeight: FontWeight.w900)),
-                      ],
-                    ),
-                    BureauPill('АКТИВНА'),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: accent),
-                onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
-                child: const Text('Готово'),
-              ),
-            ],
-          ),
+      const SectionTitle('Название'),
+      TextField(
+        controller: _title,
+        decoration: const InputDecoration(hintText: 'Чёрный городской рюкзак'),
+      ),
+      const SectionTitle('Категория'),
+      TextField(
+        controller: _category,
+        decoration: const InputDecoration(hintText: 'Сумки'),
+      ),
+      const SectionTitle('Описание'),
+      TextField(
+        controller: _description,
+        maxLines: 5,
+        decoration: const InputDecoration(
+          hintText: 'Материал, цвет, состояние и заметные детали…',
         ),
       ),
-    );
-  }
+      const SectionTitle('Публичные признаки'),
+      TextField(
+        controller: _features,
+        maxLines: 2,
+        decoration: const InputDecoration(
+          hintText: 'чёрный, красная молния, два отделения',
+        ),
+      ),
+      const SectionTitle('Скрытые признаки'),
+      TextField(
+        controller: _hidden,
+        maxLines: 2,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.lock_outline_rounded),
+          hintText: 'Серийный номер, содержимое кармана…',
+        ),
+      ),
+    ],
+  );
+
+  Widget _locationStep(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      TextField(
+        controller: _region,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.location_city_outlined),
+          labelText: 'Город или регион',
+        ),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _address,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.location_on_outlined),
+          labelText: 'Точное место (будет зашифровано)',
+        ),
+      ),
+      const SizedBox(height: 12),
+      SettingRow(
+        icon: Icons.calendar_today_outlined,
+        title: 'Дата события',
+        subtitle:
+            '${_eventAt.day.toString().padLeft(2, '0')}.${_eventAt.month.toString().padLeft(2, '0')}.${_eventAt.year}',
+        onTap: () async {
+          final value = await showDatePicker(
+            context: context,
+            firstDate: DateTime.now().subtract(const Duration(days: 3650)),
+            lastDate: DateTime.now(),
+            initialDate: _eventAt,
+          );
+          if (value != null) setState(() => _eventAt = value);
+        },
+      ),
+      if (widget.organizationId != null) ...[
+        const SectionTitle('Организация'),
+        TextField(
+          controller: _storage,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.inventory_2_outlined),
+            labelText: 'Код ячейки хранения',
+          ),
+        ),
+      ],
+      const SizedBox(height: 18),
+      NoticeCard(
+        'Публично показывается только регион и округлённая точка. Точный адрес хранится в зашифрованном виде.',
+        color: _accent,
+        background: _soft,
+      ),
+    ],
+  );
+
+  Widget _previewStep(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (_files.isNotEmpty)
+        FutureBuilder(
+          future: _files.first.readAsBytes(),
+          builder: (context, snapshot) => Container(
+            height: 240,
+            width: double.infinity,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: _soft,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: snapshot.hasData
+                ? Image.memory(snapshot.data!, fit: BoxFit.cover)
+                : const Center(child: CircularProgressIndicator()),
+          ),
+        )
+      else
+        ItemArtwork(height: 240, color: _accent, background: _soft),
+      const SizedBox(height: 14),
+      BureauPill(
+        _found ? 'НАХОДКА' : 'ПРОПАЖА',
+        color: _accent,
+        background: _soft,
+      ),
+      const SizedBox(height: 14),
+      Text(_title.text, style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 8),
+      Text(
+        _description.text,
+        style: Theme.of(
+          context,
+        ).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
+      ),
+      const SectionTitle('Место'),
+      SettingRow(
+        icon: Icons.location_on_outlined,
+        title: _region.text,
+        subtitle: _address.text.isEmpty
+            ? 'Точная точка не указана'
+            : 'Точная точка защищена',
+      ),
+      if (_media.isEmpty)
+        const Padding(
+          padding: EdgeInsets.only(top: 14),
+          child: NoticeCard(
+            'Без фотографии backend сохранит запись как черновик. Опубликовать её можно после добавления медиа.',
+            color: BureauColors.amber,
+            background: BureauColors.amberSoft,
+          ),
+        ),
+    ],
+  );
+}
+
+class PublicationSuccessPage extends StatelessWidget {
+  const PublicationSuccessPage({
+    super.key,
+    required this.listing,
+    required this.published,
+  });
+  final JsonMap listing;
+  final bool published;
+
+  @override
+  Widget build(BuildContext context) => BureauPage(
+    title: published ? 'Публикация создана' : 'Черновик сохранён',
+    subtitle: listing['id']?.toString() ?? '',
+    bottom: FilledButton(
+      onPressed: () => Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (_) => const UserShell(initialIndex: 3),
+        ),
+        (_) => false,
+      ),
+      child: const Text('Открыть мои обращения'),
+    ),
+    child: Column(
+      children: [
+        Container(
+          width: 140,
+          height: 140,
+          decoration: BoxDecoration(
+            color: published ? BureauColors.greenSoft : BureauColors.amberSoft,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            published ? Icons.check_rounded : Icons.edit_note_rounded,
+            size: 70,
+            color: published ? BureauColors.green : BureauColors.amber,
+          ),
+        ),
+        const SizedBox(height: 24),
+        Text(
+          listing['title']?.toString() ?? '',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 12),
+        NoticeCard(
+          published
+              ? 'Backend запустил поиск совпадений. Новые варианты появятся в центре совпадений.'
+              : 'Добавьте фотографию, затем переведите запись в активный статус.',
+          color: published ? BureauColors.green : BureauColors.amber,
+          background: published
+              ? BureauColors.greenSoft
+              : BureauColors.amberSoft,
+        ),
+        if (published && listing['kind'] == 'lost') ...[
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () => pushPage(
+              context,
+              MatchFlowPage(listingId: listing['id'].toString()),
+            ),
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: const Text('Проверить совпадения'),
+          ),
+        ],
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => pushPage(context, ItemDetailPage(listing: listing)),
+          icon: const Icon(Icons.visibility_outlined),
+          label: const Text('Открыть карточку'),
+        ),
+      ],
+    ),
+  );
 }

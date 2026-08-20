@@ -32,6 +32,8 @@ ROUTE_MARKERS = [
     "/{listing_id}/matches",
     "/{claim_id}/decision",
     "/{claim_id}/contact-consent",
+    "/{claim_id}/conversation",
+    "/{claim_id}/handover",
     "/handover/scan",
     "/{conversation_id}/ws",
     "/{organization_id}/dashboard",
