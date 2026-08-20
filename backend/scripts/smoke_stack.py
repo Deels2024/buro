@@ -14,15 +14,28 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 from app.core.config import settings
 
 BASE_URL = os.getenv("SMOKE_BASE_URL", "http://gateway").rstrip("/")
+PUBLIC_HOST = os.getenv("SMOKE_PUBLIC_HOST", "edinburo.ru")
+ADMIN_HOST = os.getenv("SMOKE_ADMIN_HOST", "admin.edinburo.ru")
 
 
-def request_json(opener, path: str, *, method: str = "GET", payload: dict | None = None):
+def request_json(
+    opener,
+    path: str,
+    *,
+    host: str,
+    method: str = "GET",
+    payload: dict | None = None,
+):
     body = json.dumps(payload).encode() if payload is not None else None
     request = Request(
         f"{BASE_URL}{path}",
         data=body,
         method=method,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Host": host,
+        },
     )
     try:
         with opener.open(request, timeout=20) as response:
@@ -38,7 +51,7 @@ def request_json(opener, path: str, *, method: str = "GET", payload: dict | None
 def main() -> None:
     opener = build_opener(HTTPCookieProcessor(CookieJar()))
 
-    status, health = request_json(opener, "/v1/health/ready")
+    status, health = request_json(opener, "/v1/health/ready", host=PUBLIC_HOST)
     if status != 200 or health.get("status") != "ready":
         raise RuntimeError(f"Health check failed: {health}")
 
@@ -46,6 +59,7 @@ def main() -> None:
     _, requested = request_json(
         opener,
         "/api/session/request-code",
+        host=ADMIN_HOST,
         method="POST",
         payload={"phone": phone},
     )
@@ -56,6 +70,7 @@ def main() -> None:
     _, verified = request_json(
         opener,
         "/api/session/verify-code",
+        host=ADMIN_HOST,
         method="POST",
         payload={"phone": phone, "code": code, "device_name": "Install smoke test"},
     )
@@ -65,18 +80,28 @@ def main() -> None:
     if not verified.get("authenticated"):
         raise RuntimeError(f"Administrator login failed: {verified}")
 
-    _, session = request_json(opener, "/api/session/status")
+    _, session = request_json(opener, "/api/session/status", host=ADMIN_HOST)
     if not session.get("authenticated") or session.get("user", {}).get("role") not in {
         "admin",
         "moderator",
     }:
         raise RuntimeError(f"Administrator session failed: {session}")
 
-    _, dashboard = request_json(opener, "/api/backend/admin/dashboard")
+    _, dashboard = request_json(
+        opener,
+        "/api/backend/admin/dashboard",
+        host=ADMIN_HOST,
+    )
     if "open_cases" not in dashboard or "pending_listings" not in dashboard:
         raise RuntimeError(f"Admin API returned an unexpected response: {dashboard}")
 
-    _, logged_out = request_json(opener, "/api/session/logout", method="POST", payload={})
+    _, logged_out = request_json(
+        opener,
+        "/api/session/logout",
+        host=ADMIN_HOST,
+        method="POST",
+        payload={},
+    )
     if logged_out.get("authenticated") is not False:
         raise RuntimeError(f"Logout failed: {logged_out}")
 
