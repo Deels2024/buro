@@ -18,7 +18,9 @@ jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The first Flutter image build can take longer on the production host
+    # while its multi-gigabyte SDK layers and compiler cache are warming up.
+    timeout-minutes: 45
     steps:
       - name: Configure deployment key
         env:
@@ -33,7 +35,7 @@ jobs:
           ssh
           -o IdentitiesOnly=yes
           -o BatchMode=yes
-          -o ConnectTimeout=15
+          -o ConnectTimeout=60
           -o ServerAliveInterval=15
           -o ServerAliveCountMax=4
           root@5.183.191.139
