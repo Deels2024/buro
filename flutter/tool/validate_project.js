@@ -31,6 +31,13 @@ const requiredFiles = [
   'web/icons/icon-192.png',
   'web/icons/icon-512.png',
   'web/og-image.png',
+  'web/seo.css',
+  'web/poteryal-veshch/index.html',
+  'web/nashel-veshch/index.html',
+  'web/poteryannye-veshchi/index.html',
+  'web/naydennye-veshchi/index.html',
+  'web/byuro-nahodok-moskva/index.html',
+  'web/byuro-nahodok-sankt-peterburg/index.html',
 ];
 
 const missingFiles = requiredFiles.filter(
@@ -124,8 +131,18 @@ for (const marker of [
 }
 
 const sitemap = fs.readFileSync(path.join(root, 'web/sitemap.xml'), 'utf8');
-if (!sitemap.includes('<loc>https://edinburo.ru/</loc>')) {
-  throw new Error('sitemap.xml не содержит канонический адрес главной страницы');
+for (const url of [
+  'https://edinburo.ru/',
+  'https://edinburo.ru/poteryal-veshch/',
+  'https://edinburo.ru/nashel-veshch/',
+  'https://edinburo.ru/poteryannye-veshchi/',
+  'https://edinburo.ru/naydennye-veshchi/',
+  'https://edinburo.ru/byuro-nahodok-moskva/',
+  'https://edinburo.ru/byuro-nahodok-sankt-peterburg/',
+]) {
+  if (!sitemap.includes(`<loc>${url}</loc>`)) {
+    throw new Error(`sitemap.xml не содержит индексируемый адрес: ${url}`);
+  }
 }
 
 const buildRoot = path.join(root, 'build/web');
@@ -139,6 +156,13 @@ if (fs.existsSync(buildRoot)) {
     'icons/icon-180.png',
     'icons/icon-192.png',
     'icons/icon-512.png',
+    'seo.css',
+    'poteryal-veshch/index.html',
+    'nashel-veshch/index.html',
+    'poteryannye-veshchi/index.html',
+    'naydennye-veshchi/index.html',
+    'byuro-nahodok-moskva/index.html',
+    'byuro-nahodok-sankt-peterburg/index.html',
   ]) {
     if (!fs.existsSync(path.join(buildRoot, file))) {
       throw new Error(`Production web-сборка не содержит SEO-файл: ${file}`);
