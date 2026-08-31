@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7faff"/>
+      <stop offset="1" stop-color="#e6efff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1040" cy="90" r="210" fill="#1769ff" opacity="0.07"/>
+  <circle cx="110" cy="590" r="190" fill="#1769ff" opacity="0.05"/>
+  <rect x="92" y="118" width="156" height="156" rx="42" fill="#1769ff"/>
+  <text x="170" y="214" fill="#fff" font-family="Arial, sans-serif" font-size="54" font-weight="700" text-anchor="middle">БН</text>
+  <text x="92" y="370" fill="#132238" font-family="Arial, sans-serif" font-size="64" font-weight="700">Бюро находок</text>
+  <text x="92" y="438" fill="#1769ff" font-family="Arial, sans-serif" font-size="38" font-weight="700">Найдём и вернём</text>
+  <text x="92" y="505" fill="#617087" font-family="Arial, sans-serif" font-size="28">Единая сеть поиска потерянных вещей по всей России</text>
+  <g transform="translate(940 335)" fill="none" stroke="#1769ff" stroke-width="15" stroke-linecap="round">
+    <path d="M0 0 70-70M0 0 70 70M0 0-70 70M0 0-70-70"/>
+  </g>
+  <g fill="#1769ff">
+    <circle cx="940" cy="335" r="34"/>
+    <circle cx="1010" cy="265" r="25"/>
+    <circle cx="1010" cy="405" r="25"/>
+    <circle cx="870" cy="405" r="25"/>
+    <circle cx="870" cy="265" r="25"/>
+  </g>
+</svg>

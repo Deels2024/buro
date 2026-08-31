@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "Бюро находок",
+  "short_name": "Бюро находок",
+  "description": "Единый сервис поиска и безопасного возврата потерянных вещей по всей России.",
+  "lang": "ru-RU",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f7fc",
+  "theme_color": "#1769ff",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
