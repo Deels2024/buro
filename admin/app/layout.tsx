@@ -6,6 +6,16 @@ import "./comfort.css";
 export const metadata: Metadata = {
   title: "Бюро находок — Админка",
   description: "Операционный центр единой федеральной сети поиска и возврата вещей.",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
+  },
   other: {
     "codex-preview": "development",
   },

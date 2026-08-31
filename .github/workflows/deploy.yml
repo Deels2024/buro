@@ -47,11 +47,13 @@ jobs:
             web_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://edinburo.ru/ || true)"
             admin_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://admin.edinburo.ru/ || true)"
             api_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/v1/health/ready || true)"
-            if [[ "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* ]]; then
-              printf 'Public deployment is healthy (web=%s admin=%s).\n' "$web_status" "$admin_status"
+            robots_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/robots.txt || true)"
+            sitemap_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/sitemap.xml || true)"
+            if [[ "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* && "$robots_body" == *'Sitemap: https://edinburo.ru/sitemap.xml'* && "$sitemap_body" == *'<loc>https://edinburo.ru/</loc>'* ]]; then
+              printf 'Public deployment is healthy (web=%s admin=%s SEO=ready).\n' "$web_status" "$admin_status"
               exit 0
             fi
-            printf 'Attempt %s/12: web=%s admin=%s api=%s\n' "$attempt" "$web_status" "$admin_status" "${api_body:-unavailable}"
+            printf 'Attempt %s/12: web=%s admin=%s api=%s robots=%s sitemap=%s\n' "$attempt" "$web_status" "$admin_status" "${api_body:-unavailable}" "${robots_body:+available}" "${sitemap_body:+available}"
             sleep 5
           done
 

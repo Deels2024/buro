@@ -22,6 +22,15 @@ const requiredFiles = [
   'lib/features/organization/organization_app.dart',
   'lib/features/admin/admin_app.dart',
   'lib/features/catalog/catalog_page.dart',
+  'web/index.html',
+  'web/robots.txt',
+  'web/sitemap.xml',
+  'web/site.webmanifest',
+  'web/favicon.svg',
+  'web/icons/icon-180.png',
+  'web/icons/icon-192.png',
+  'web/icons/icon-512.png',
+  'web/og-image.png',
 ];
 
 const missingFiles = requiredFiles.filter(
@@ -88,6 +97,53 @@ for (const marker of ['Idempotency-Key', '/auth/refresh', 'x-request-id', '/app/
 
 if (missingMarkers.length > 0) {
   throw new Error(`Не найдены ключевые сценарии: ${missingMarkers.join(', ')}`);
+}
+
+const webIndex = fs.readFileSync(path.join(root, 'web/index.html'), 'utf8');
+for (const marker of [
+  '<link rel="canonical" href="https://edinburo.ru/">',
+  '<meta name="robots" content="index, follow,',
+  '<meta property="og:image" content="https://edinburo.ru/og-image.png">',
+  'application/ld+json',
+]) {
+  if (!webIndex.includes(marker)) {
+    throw new Error(`Главная страница не содержит обязательный SEO-маркер: ${marker}`);
+  }
+}
+
+const robots = fs.readFileSync(path.join(root, 'web/robots.txt'), 'utf8');
+for (const marker of [
+  'User-agent: *',
+  'Allow: /',
+  'Disallow: /v1/',
+  'Sitemap: https://edinburo.ru/sitemap.xml',
+]) {
+  if (!robots.includes(marker)) {
+    throw new Error(`robots.txt не содержит обязательную директиву: ${marker}`);
+  }
+}
+
+const sitemap = fs.readFileSync(path.join(root, 'web/sitemap.xml'), 'utf8');
+if (!sitemap.includes('<loc>https://edinburo.ru/</loc>')) {
+  throw new Error('sitemap.xml не содержит канонический адрес главной страницы');
+}
+
+const buildRoot = path.join(root, 'build/web');
+if (fs.existsSync(buildRoot)) {
+  for (const file of [
+    'robots.txt',
+    'sitemap.xml',
+    'site.webmanifest',
+    'favicon.svg',
+    'og-image.png',
+    'icons/icon-180.png',
+    'icons/icon-192.png',
+    'icons/icon-512.png',
+  ]) {
+    if (!fs.existsSync(path.join(buildRoot, file))) {
+      throw new Error(`Production web-сборка не содержит SEO-файл: ${file}`);
+    }
+  }
 }
 
 const mappedIds = [...catalog.matchAll(/^\s*'([UOA]\d{2})': \[/gm)].map((match) => match[1]);
