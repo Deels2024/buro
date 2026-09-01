@@ -63,6 +63,8 @@ docker compose --profile ai up -d --build
 
 Если вы включаете OpenAI при локальном запуске, `BN_S3_PUBLIC_ENDPOINT` должен быть доступен из интернета: облачная модель не сможет открыть ссылку вида `localhost`. В production Yandex Object Storage уже имеет внешний HTTPS endpoint.
 
+Production-ключ OpenAI не передаётся через Compose или `.env`. Создайте защищённое GitHub Environment `production`, добавьте в него secret `BN_OPENAI_API_KEY` и вручную запустите workflow `Configure OpenAI production key`. Workflow получает одноразовый GitHub OIDC-токен, production API проверяет ключ минимальным Responses API запросом и сохраняет его в приватный Docker volume как файл с режимом `0400`.
+
 ## Первый вход
 
 В development SMS-провайдер отключён, поэтому `POST /v1/auth/request-code` возвращает поле `dev_code`. Номер из `BN_BOOTSTRAP_ADMIN_PHONE` при первом подтверждении получает роль `admin`.

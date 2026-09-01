@@ -1,0 +1,123 @@
+name: Configure OpenAI production key
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: production-buro
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+    steps:
+      - name: Validate and install the production OpenAI key
+        shell: python
+        env:
+          BN_OPENAI_API_KEY: ${{ secrets.BN_OPENAI_API_KEY }}
+          OIDC_AUDIENCE: https://edinburo.ru/v1/internal/deployment/openai-key
+          CONFIGURE_URL: https://edinburo.ru/v1/internal/deployment/openai-key
+        run: |
+          import hashlib
+          import hmac
+          import json
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import quote
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          class RejectRedirects(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          def fail(message):
+              print(f"::error::{message}")
+              raise SystemExit(1)
+
+          key = os.environ.get("BN_OPENAI_API_KEY", "")
+          valid_chars = all(
+              character.isascii()
+              and (character.isalnum() or character in "_-")
+              for character in key
+          )
+          if not key.startswith("sk-") or not 40 <= len(key) <= 512 or not valid_chars:
+              fail("BN_OPENAI_API_KEY is missing or malformed.")
+
+          audience = os.environ["OIDC_AUDIENCE"]
+          configure_url = os.environ["CONFIGURE_URL"]
+          oidc_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+          request_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+          if not oidc_url or not request_token:
+              fail("GitHub OIDC variables are unavailable.")
+
+          opener = build_opener(RejectRedirects)
+          separator = "&" if "?" in oidc_url else "?"
+          oidc_request = Request(
+              oidc_url + separator + "audience=" + quote(audience, safe=""),
+              headers={
+                  "Authorization": "Bearer " + request_token,
+                  "Accept": "application/json",
+              },
+              method="GET",
+          )
+          try:
+              with opener.open(oidc_request, timeout=30) as oidc_response:
+                  oidc_raw = oidc_response.read(65_537)
+          except (HTTPError, URLError, TimeoutError):
+              fail("Could not obtain a GitHub OIDC token.")
+          if len(oidc_raw) > 65_536:
+              fail("GitHub OIDC response is unexpectedly large.")
+          try:
+              oidc_token = json.loads(oidc_raw)["value"]
+          except (json.JSONDecodeError, KeyError, TypeError):
+              fail("GitHub OIDC response is invalid.")
+
+          key_bytes = key.encode("ascii")
+          expected_fingerprint = hashlib.sha256(key_bytes).hexdigest()
+          os.environ.pop("BN_OPENAI_API_KEY", None)
+          os.environ.pop("ACTIONS_ID_TOKEN_REQUEST_TOKEN", None)
+          del key
+          del request_token
+
+          configure_request = Request(
+              configure_url,
+              data=key_bytes,
+              headers={
+                  "Authorization": "Bearer " + oidc_token,
+                  "Content-Type": "application/octet-stream",
+                  "Accept": "application/json",
+                  "Cache-Control": "no-store",
+              },
+              method="POST",
+          )
+          del key_bytes
+          del oidc_token
+          try:
+              with opener.open(configure_request, timeout=120) as configure_response:
+                  result_raw = configure_response.read(8_193)
+          except HTTPError as error:
+              fail(f"Production rejected OpenAI configuration (HTTP {error.code}).")
+          except (URLError, TimeoutError):
+              fail("Production configuration endpoint is unavailable.")
+          if len(result_raw) > 8_192:
+              fail("Production response is unexpectedly large.")
+          try:
+              result = json.loads(result_raw)
+          except (json.JSONDecodeError, TypeError):
+              fail("Production returned an invalid response.")
+          if result.get("status") != "configured":
+              fail("Production did not confirm OpenAI configuration.")
+          fingerprint = result.get("fingerprint_sha256", "")
+          if not isinstance(fingerprint, str) or not hmac.compare_digest(
+              fingerprint,
+              expected_fingerprint,
+          ):
+              fail("Production stored a different secret.")
+          print("OpenAI configuration installed and verified.")

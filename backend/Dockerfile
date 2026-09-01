@@ -14,7 +14,8 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY scripts ./scripts
 
-RUN addgroup --system bureau && adduser --system --ingroup bureau bureau \
+RUN addgroup --system --gid 10001 bureau \
+    && adduser --system --uid 10001 --ingroup bureau --no-create-home bureau \
     && chown -R bureau:bureau /app
 USER bureau
 

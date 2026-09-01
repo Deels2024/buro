@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 100 * 1024 * 1024
 
     openai_api_key: str = ""
+    openai_api_key_file: str = ""
     openai_model: str = "gpt-5.6"
     openclip_url: str = "http://localhost:8090"
     openclip_timeout_seconds: int = 20
@@ -52,6 +54,20 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
+
+    @model_validator(mode="after")
+    def load_openai_api_key_file(self) -> "Settings":
+        if not self.openai_api_key_file:
+            return self
+        try:
+            openai_key = Path(self.openai_api_key_file).read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            return self
+        except OSError as exc:
+            raise ValueError("BN_OPENAI_API_KEY_FILE cannot be read") from exc
+        if openai_key:
+            self.openai_api_key = openai_key
+        return self
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
