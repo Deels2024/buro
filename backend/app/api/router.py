@@ -9,6 +9,7 @@ from app.api.routes import (
     chat,
     claims,
     health,
+    internal_deployment,
     listings,
     media,
     organizations,
@@ -18,6 +19,7 @@ from app.api.routes import (
 
 api_router = APIRouter()
 api_router.include_router(health.router)
+api_router.include_router(internal_deployment.router, prefix="/internal/deployment")
 api_router.include_router(app_meta.router, prefix="/app", tags=["app"])
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])

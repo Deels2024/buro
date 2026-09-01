@@ -58,6 +58,24 @@ services:
       retries: 20
     restart: unless-stopped
 
+  openai-secret-init:
+    image: alpine:3.20
+    volumes:
+      - openai_secret:/run/bureau-secrets
+    entrypoint:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        mkdir -p /run/bureau-secrets
+        chown 10001:10001 /run/bureau-secrets
+        chmod 0700 /run/bureau-secrets
+        if [ -f /run/bureau-secrets/openai_api_key ]; then
+          chown 10001:10001 /run/bureau-secrets/openai_api_key
+          chmod 0400 /run/bureau-secrets/openai_api_key
+        fi
+    restart: "no"
+
   api:
     build: ./backend
     environment: &backend_environment
@@ -77,7 +95,7 @@ services:
       BN_S3_ACCESS_KEY: bureau
       BN_S3_SECRET_KEY: "${MINIO_PASSWORD}"
       BN_S3_PRESIGN_TTL_SECONDS: 900
-      BN_OPENAI_API_KEY: "${BN_OPENAI_API_KEY:-}"
+      BN_OPENAI_API_KEY_FILE: /run/bureau-secrets/openai_api_key
       BN_OPENAI_MODEL: "${BN_OPENAI_MODEL:-gpt-5.6}"
       BN_OPENCLIP_URL: http://openclip:8090
       BN_OPENCLIP_TIMEOUT_SECONDS: 20
@@ -96,6 +114,10 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      openai-secret-init:
+        condition: service_completed_successfully
+    volumes:
+      - openai_secret:/run/bureau-secrets
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/v1/health/ready', timeout=3)"]
       interval: 10s
@@ -183,3 +205,4 @@ volumes:
   redis_data:
   minio_data:
   openclip_cache:
+  openai_secret:

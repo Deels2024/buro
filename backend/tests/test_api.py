@@ -18,3 +18,4 @@ def test_liveness_and_openapi() -> None:
         assert "/v1/admin/support/tickets" in schema["paths"]
         assert "/v1/app/bootstrap" in schema["paths"]
         assert "get" in schema["paths"]["/v1/admin/ads"]
+        assert "/v1/internal/deployment/openai-key" not in schema["paths"]

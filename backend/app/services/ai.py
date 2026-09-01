@@ -13,6 +13,26 @@ logger = logging.getLogger(__name__)
 class AIService:
     def __init__(self) -> None:
         self.openai = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self._retired_openai_clients: list[AsyncOpenAI] = []
+
+    @property
+    def openai_configured(self) -> bool:
+        return self.openai is not None
+
+    def configure_openai(self, api_key: str) -> None:
+        # Attribute replacement is atomic. Requests already using the previous
+        # client can finish while all new requests immediately use this key.
+        previous_client = self.openai
+        self.openai = AsyncOpenAI(api_key=api_key)
+        if previous_client:
+            self._retired_openai_clients.append(previous_client)
+
+    async def close(self) -> None:
+        if self.openai:
+            await self.openai.close()
+        for client in self._retired_openai_clients:
+            await client.close()
+        self._retired_openai_clients.clear()
 
     async def describe_item(
         self,

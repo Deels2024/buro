@@ -1,0 +1,29 @@
+from pathlib import Path
+
+from app.core.config import Settings
+
+
+def test_openai_key_can_be_loaded_from_secret_file(tmp_path: Path) -> None:
+    secret_file = tmp_path / "openai_api_key"
+    secret_file.write_text("sk-test-file-value-0000000000000000000000000000\n", encoding="utf-8")
+
+    loaded = Settings(
+        _env_file=None,
+        openai_api_key="",
+        openai_api_key_file=str(secret_file),
+    )
+
+    assert loaded.openai_api_key == "sk-test-file-value-0000000000000000000000000000"
+
+
+def test_secret_file_takes_precedence_over_explicit_openai_key(tmp_path: Path) -> None:
+    secret_file = tmp_path / "openai_api_key"
+    secret_file.write_text("sk-test-file-value-0000000000000000000000000000\n", encoding="utf-8")
+
+    loaded = Settings(
+        _env_file=None,
+        openai_api_key="sk-test-environment-value-000000000000000000000000",
+        openai_api_key_file=str(secret_file),
+    )
+
+    assert loaded.openai_api_key == "sk-test-file-value-0000000000000000000000000000"

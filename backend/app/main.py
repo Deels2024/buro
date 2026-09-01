@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import settings
 from app.middleware import IdempotencyMiddleware, RequestContextMiddleware
+from app.services.ai import ai_service
 from app.services.cache import redis
 from app.services.storage import storage
 
@@ -25,6 +26,7 @@ async def lifespan(_: FastAPI):
         except Exception:
             logging.getLogger(__name__).exception("Object storage is not ready")
     yield
+    await ai_service.close()
     await redis.aclose()
 
 
