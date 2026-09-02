@@ -87,7 +87,7 @@ services:
       BN_PII_FERNET_KEY: "${BN_PII_FERNET_KEY}"
       BN_DATABASE_URL: postgresql+asyncpg://bureau:${POSTGRES_PASSWORD}@postgres:5432/bureau
       BN_REDIS_URL: redis://redis:6379/0
-      BN_CORS_ORIGINS: "[\"${PUBLIC_BASE_URL:-http://localhost}\"]"
+      BN_CORS_ORIGINS: "${BN_CORS_ORIGINS:-[\"${PUBLIC_BASE_URL:-http://localhost}\"]}"
       BN_S3_ENDPOINT: http://minio:9000
       BN_S3_PUBLIC_ENDPOINT: "${S3_PUBLIC_URL:-http://localhost:9000}"
       BN_S3_REGION: ru-central1
