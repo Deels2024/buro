@@ -297,7 +297,10 @@ class _VerifyPhonePageState extends State<VerifyPhonePage> {
                 }
               }
               if (!context.mounted) return;
-              Navigator.of(context).popUntil((route) => route.isFirst);
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute<void>(builder: (_) => const UserShell()),
+                (route) => false,
+              );
             },
           ),
           const SizedBox(height: 18),
