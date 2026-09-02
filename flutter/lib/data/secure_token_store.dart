@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'bureau_api_client.dart';
@@ -20,10 +21,17 @@ class SecureBureauTokenStore implements BureauTokenStore {
   BureauTokens? _cached;
   bool _loaded = false;
 
+  // flutter_secure_storage deliberately rejects plain HTTP on web. Keep an
+  // in-memory session for temporary IP-based access instead of weakening token
+  // protection by persisting credentials in localStorage.
+  bool get _usesMemoryOnlyWebSession =>
+      kIsWeb && Uri.base.scheme != 'https' && Uri.base.host != 'localhost';
+
   @override
   Future<BureauTokens?> read() async {
     if (_loaded) return _cached;
     _loaded = true;
+    if (_usesMemoryOnlyWebSession) return null;
     final raw = await _storage.read(key: _key);
     if (raw == null || raw.isEmpty) return null;
     try {
@@ -40,6 +48,7 @@ class SecureBureauTokenStore implements BureauTokenStore {
   Future<void> write(BureauTokens? tokens) async {
     _loaded = true;
     _cached = tokens;
+    if (_usesMemoryOnlyWebSession) return;
     if (tokens == null) {
       await _storage.delete(key: _key);
     } else {

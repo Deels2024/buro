@@ -27,3 +27,14 @@ def test_secret_file_takes_precedence_over_explicit_openai_key(tmp_path: Path) -
     )
 
     assert loaded.openai_api_key == "sk-test-file-value-0000000000000000000000000000"
+
+
+def test_smsc_login_and_password_configure_provider() -> None:
+    assert Settings(_env_file=None, smsc_login="login", smsc_password="password").smsc_is_configured
+    assert not Settings(_env_file=None, smsc_login="login").smsc_is_configured
+
+
+def test_smsc_url_must_be_https() -> None:
+    assert Settings(_env_file=None, smsc_url="https://smsc.ru/sys/send.php").smsc_url_is_secure
+    assert not Settings(_env_file=None, smsc_url="http://smsc.ru/sys/send.php").smsc_url_is_secure
+    assert not Settings(_env_file=None, smsc_url="not-a-url").smsc_url_is_secure

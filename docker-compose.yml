@@ -87,7 +87,7 @@ services:
       BN_PII_FERNET_KEY: "${BN_PII_FERNET_KEY}"
       BN_DATABASE_URL: postgresql+asyncpg://bureau:${POSTGRES_PASSWORD}@postgres:5432/bureau
       BN_REDIS_URL: redis://redis:6379/0
-      BN_CORS_ORIGINS: "[\"${PUBLIC_BASE_URL:-http://localhost}\"]"
+      BN_CORS_ORIGINS: "${BN_CORS_ORIGINS:-[\"${PUBLIC_BASE_URL:-http://localhost}\"]}"
       BN_S3_ENDPOINT: http://minio:9000
       BN_S3_PUBLIC_ENDPOINT: "${S3_PUBLIC_URL:-http://localhost:9000}"
       BN_S3_REGION: ru-central1
@@ -99,14 +99,16 @@ services:
       BN_OPENAI_MODEL: "${BN_OPENAI_MODEL:-gpt-5.6}"
       BN_OPENCLIP_URL: http://openclip:8090
       BN_OPENCLIP_TIMEOUT_SECONDS: 20
-      BN_SMS_PROVIDER_URL: "${BN_SMS_PROVIDER_URL:-}"
-      BN_SMS_PROVIDER_TOKEN: "${BN_SMS_PROVIDER_TOKEN:-}"
+      BN_SMSC_URL: "${BN_SMSC_URL:-https://smsc.ru/sys/send.php}"
+      BN_SMSC_LOGIN: "${BN_SMSC_LOGIN:-}"
+      BN_SMSC_PASSWORD: "${BN_SMSC_PASSWORD:-}"
+      BN_SMSC_SENDER: "${BN_SMSC_SENDER:-}"
       BN_BOOTSTRAP_ADMIN_PHONE: "${BN_BOOTSTRAP_ADMIN_PHONE:-+79990000000}"
       BN_PUBLIC_API_URL: "${PUBLIC_BASE_URL:-http://localhost}/v1"
       BN_SUPPORT_EMAIL: "${BN_SUPPORT_EMAIL:-support@bureau.local}"
       BN_ADMIN_2FA_ISSUER: "Бюро находок"
       BN_LOG_LEVEL: INFO
-    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --proxy-headers"]
+    command: ["sh", "-c", "alembic upgrade head && python scripts/seed.py && exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --no-proxy-headers"]
     depends_on:
       postgres:
         condition: service_healthy

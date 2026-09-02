@@ -78,6 +78,20 @@ Production-ключ OpenAI не передаётся через Compose или `
 5. отключите публичный MinIO и используйте приватный bucket;
 6. храните секреты в Secret Manager, а не в `.env` внутри образа.
 
+### SMSC
+
+Для SMS-авторизации задайте на сервере логин и пароль из личного кабинета SMSC:
+
+```dotenv
+BN_SMSC_LOGIN=<логин SMSC>
+BN_SMSC_PASSWORD=<пароль SMSC>
+# Необязательно: зарегистрированное в SMSC имя отправителя.
+BN_SMSC_SENDER=EDINBURO
+```
+
+После изменения переменных пересоберите `api` и `worker`:
+`docker compose up -d --build --force-recreate api worker`.
+
 ## Основные API
 
 | Контур | Маршруты |
