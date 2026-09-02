@@ -80,17 +80,17 @@ Production-ключ OpenAI не передаётся через Compose или `
 
 ### SMSC
 
-Для SMS-авторизации задайте на сервере API-ключ из личного кабинета SMSC:
+Для SMS-авторизации задайте на сервере логин и пароль из личного кабинета SMSC:
 
 ```dotenv
-BN_SMSC_API_KEY=<секретный API-ключ SMSC>
+BN_SMSC_LOGIN=<логин SMSC>
+BN_SMSC_PASSWORD=<пароль SMSC>
 # Необязательно: зарегистрированное в SMSC имя отправителя.
 BN_SMSC_SENDER=EDINBURO
 ```
 
-Вместо API-ключа допускается пара `BN_SMSC_LOGIN` и `BN_SMSC_PASSWORD`. Не задавайте
-оба способа авторизации: приоритет имеет API-ключ. После изменения переменных пересоберите
-`api` и `worker`: `docker compose up -d --build --force-recreate api worker`.
+После изменения переменных пересоберите `api` и `worker`:
+`docker compose up -d --build --force-recreate api worker`.
 
 ## Основные API
 

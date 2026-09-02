@@ -16,11 +16,8 @@ def _smsc_request_data(phone: str, code: str) -> dict[str, str]:
         "charset": "utf-8",
         "fmt": "3",
     }
-    if settings.smsc_api_key:
-        data["apikey"] = settings.smsc_api_key
-    else:
-        data["login"] = settings.smsc_login
-        data["psw"] = settings.smsc_password
+    data["login"] = settings.smsc_login
+    data["psw"] = settings.smsc_password
     if settings.smsc_sender:
         data["sender"] = settings.smsc_sender
     return data

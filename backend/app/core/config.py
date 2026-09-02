@@ -34,7 +34,6 @@ class Settings(BaseSettings):
     openclip_timeout_seconds: int = 20
 
     smsc_url: str = "https://smsc.ru/sys/send.php"
-    smsc_api_key: str = ""
     smsc_login: str = ""
     smsc_password: str = ""
     smsc_sender: str = ""
@@ -60,7 +59,7 @@ class Settings(BaseSettings):
 
     @property
     def smsc_is_configured(self) -> bool:
-        return bool(self.smsc_api_key or (self.smsc_login and self.smsc_password))
+        return bool(self.smsc_login and self.smsc_password)
 
     @model_validator(mode="after")
     def load_openai_api_key_file(self) -> "Settings":
@@ -88,7 +87,7 @@ class Settings(BaseSettings):
         if len(self.pii_fernet_key) != 44:
             problems.append("BN_PII_FERNET_KEY")
         if not self.smsc_is_configured:
-            problems.append("BN_SMSC_API_KEY or BN_SMSC_LOGIN and BN_SMSC_PASSWORD")
+            problems.append("BN_SMSC_LOGIN and BN_SMSC_PASSWORD")
         if len(self.s3_secret_key) < 16:
             problems.append("BN_S3_SECRET_KEY")
         if not self.public_api_url.startswith("https://"):

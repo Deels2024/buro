@@ -100,7 +100,6 @@ services:
       BN_OPENCLIP_URL: http://openclip:8090
       BN_OPENCLIP_TIMEOUT_SECONDS: 20
       BN_SMSC_URL: "${BN_SMSC_URL:-https://smsc.ru/sys/send.php}"
-      BN_SMSC_API_KEY: "${BN_SMSC_API_KEY:-}"
       BN_SMSC_LOGIN: "${BN_SMSC_LOGIN:-}"
       BN_SMSC_PASSWORD: "${BN_SMSC_PASSWORD:-}"
       BN_SMSC_SENDER: "${BN_SMSC_SENDER:-}"
