@@ -214,9 +214,14 @@ class _AuthPageState extends State<AuthPage> {
             label: 'Получить код',
             onPressed: () async {
               final controller = AppScope.of(context, listen: false);
-              await controller.requestCode(_phone.text);
+              final result = await controller.requestCode(_phone.text);
               if (!context.mounted) return;
-              pushPage(context, const VerifyPhonePage());
+              pushPage(
+                context,
+                VerifyPhonePage(
+                  initialRetryAfter: _retryAfterFromResult(result),
+                ),
+              );
             },
           ),
           const SizedBox(height: 12),
@@ -244,7 +249,9 @@ class _AuthPageState extends State<AuthPage> {
 }
 
 class VerifyPhonePage extends StatefulWidget {
-  const VerifyPhonePage({super.key});
+  const VerifyPhonePage({super.key, this.initialRetryAfter = 60});
+
+  final int initialRetryAfter;
 
   @override
   State<VerifyPhonePage> createState() => _VerifyPhonePageState();
@@ -252,9 +259,56 @@ class VerifyPhonePage extends StatefulWidget {
 
 class _VerifyPhonePageState extends State<VerifyPhonePage> {
   final _code = TextEditingController();
+  Timer? _retryTimer;
+  late int _retryAfter;
+  bool _resending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _retryAfter = widget.initialRetryAfter;
+    _scheduleRetryTimer();
+  }
+
+  void _scheduleRetryTimer() {
+    _retryTimer?.cancel();
+    if (_retryAfter <= 0) return;
+    _retryTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return timer.cancel();
+      setState(() {
+        if (_retryAfter <= 1) {
+          _retryAfter = 0;
+          timer.cancel();
+        } else {
+          _retryAfter -= 1;
+        }
+      });
+    });
+  }
+
+  void _restartRetryTimer(int seconds) {
+    setState(() => _retryAfter = seconds);
+    _scheduleRetryTimer();
+  }
+
+  Future<void> _resendCode(AppController controller) async {
+    if (_retryAfter > 0 || _resending) return;
+    setState(() => _resending = true);
+    try {
+      final result = await controller.requestCode(controller.pendingPhone ?? '');
+      if (!mounted) return;
+      _restartRetryTimer(_retryAfterFromResult(result));
+      showApiSuccess(context, 'Новый код отправлен');
+    } catch (error) {
+      if (mounted) showApiError(context, error);
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
 
   @override
   void dispose() {
+    _retryTimer?.cancel();
     _code.dispose();
     super.dispose();
   }
@@ -306,17 +360,27 @@ class _VerifyPhonePageState extends State<VerifyPhonePage> {
           const SizedBox(height: 18),
           if (!mfa)
             TextButton(
-              onPressed: () async {
-                await controller.requestCode(controller.pendingPhone ?? '');
-                if (!context.mounted) return;
-                showApiSuccess(context, 'Новый код отправлен');
-              },
-              child: const Text('Отправить код повторно'),
+              onPressed: _retryAfter > 0 || _resending
+                  ? null
+                  : () => _resendCode(controller),
+              child: Text(
+                _resending
+                    ? 'Отправляем код…'
+                    : _retryAfter > 0
+                    ? 'Отправить повторно через $_retryAfter с'
+                    : 'Отправить код повторно',
+              ),
             ),
         ],
       ),
     );
   }
+}
+
+int _retryAfterFromResult(JsonMap result) {
+  final value = result['retry_after'];
+  final seconds = value is num ? value.toInt() : 60;
+  return seconds > 0 ? seconds : 60;
 }
 
 class UserShell extends StatefulWidget {

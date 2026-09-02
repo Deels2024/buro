@@ -46,6 +46,21 @@ if grep -q "__POSTGRES_PASSWORD__" .env; then replace_placeholder "__POSTGRES_PA
 if grep -q "__MINIO_PASSWORD__" .env; then replace_placeholder "__MINIO_PASSWORD__" "$(random_hex)"; fi
 
 . ./.env
+
+if [ "${BN_ENVIRONMENT:-development}" = "production" ]; then
+  if [ -z "${BN_SMSC_LOGIN:-}" ] || [ -z "${BN_SMSC_PASSWORD:-}" ]; then
+    echo "Production SMSC credentials are missing: set BN_SMSC_LOGIN and BN_SMSC_PASSWORD in .env." >&2
+    exit 1
+  fi
+  case "${BN_SMSC_URL:-https://smsc.ru/sys/send.php}" in
+    https://*) ;;
+    *)
+      echo "Production BN_SMSC_URL must use HTTPS." >&2
+      exit 1
+      ;;
+  esac
+fi
+
 docker compose config --quiet
 docker compose up -d --build --wait --wait-timeout "${INSTALL_WAIT_TIMEOUT:-300}"
 

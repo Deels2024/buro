@@ -4,6 +4,10 @@ import test from "node:test";
 
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const proxy = await readFile(new URL("../app/api/backend/[...path]/route.ts", import.meta.url), "utf8");
+const requestCode = await readFile(
+  new URL("../app/api/session/request-code/route.ts", import.meta.url),
+  "utf8",
+);
 const session = await readFile(new URL("../app/lib/backend.ts", import.meta.url), "utf8");
 const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const robots = await readFile(new URL("../app/robots.ts", import.meta.url), "utf8");
@@ -30,6 +34,11 @@ test("authenticated proxy forwards all required methods", () => {
   for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
     assert.ok(proxy.includes("export const " + method + " = proxy"), method);
   }
+});
+
+test("SMS request forwards the client address injected by the gateway", () => {
+  assert.match(requestCode, /request\.headers\.get\(["']x-real-ip["']\)/);
+  assert.match(requestCode, /headers\.set\(["']X-Real-IP["'], clientIp\)/);
 });
 
 test("new finding is saved as a valid draft until a photo is uploaded", () => {

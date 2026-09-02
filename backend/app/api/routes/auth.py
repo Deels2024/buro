@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -32,11 +33,78 @@ from app.schemas import (
     TOTPEnableRequest,
     TOTPSetupOut,
 )
-from app.services.cache import get_json, rate_limit, redis, set_json
+from app.services.cache import (
+    OtpVerificationResult,
+    rate_limit,
+    redis,
+    set_json,
+    verify_and_consume_otp,
+)
 from app.services.sms import send_otp
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+OTP_RESEND_COOLDOWN_SECONDS = 60
+_TRUSTED_PROXY_NETWORKS = tuple(
+    ip_network(network)
+    for network in (
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
+
+
+def _parse_ip(value: str | None) -> IPv4Address | IPv6Address | None:
+    if not value:
+        return None
+    try:
+        return ip_address(value.strip())
+    except ValueError:
+        return None
+
+
+def _client_ip(request: Request) -> str:
+    """Return the real client address supplied by the private Docker gateway.
+
+    The public Nginx gateway overwrites X-Real-IP with ``$remote_addr``. We only
+    trust that value when the immediate peer is a loopback/private address, so
+    a direct public caller cannot choose another rate-limit bucket.
+    """
+
+    peer = _parse_ip(request.client.host if request.client else None)
+    if peer and any(peer in network for network in _TRUSTED_PROXY_NETWORKS):
+        forwarded = _parse_ip(request.headers.get("x-real-ip"))
+        if forwarded:
+            return forwarded.compressed
+    if peer:
+        return peer.compressed
+    return "unknown"
+
+
+async def _otp_cooldown_remaining(key: str) -> int:
+    remaining = await redis.ttl(key)
+    return remaining if remaining > 0 else 0
+
+
+async def _acquire_otp_cooldown(key: str) -> int:
+    acquired = await redis.set(key, "1", ex=OTP_RESEND_COOLDOWN_SECONDS, nx=True)
+    if acquired:
+        return 0
+    return max(await _otp_cooldown_remaining(key), 1)
+
+
+def _raise_otp_cooldown(retry_after: int) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=f"Новый код можно запросить через {retry_after} сек.",
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 def _tokens(user: User, refresh_token: str, *, mfa: bool = False) -> TokenPair:
@@ -71,23 +139,33 @@ async def request_code(payload: PhoneCodeRequest, request: Request) -> PhoneCode
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     phone_hash = phone_lookup_hash(phone)
-    client_key = hash_secret(request.client.host if request.client else "unknown")[:24]
+    cooldown_key = f"otp:phone:cooldown:{phone_hash}"
+    retry_after = await _otp_cooldown_remaining(cooldown_key)
+    if retry_after:
+        _raise_otp_cooldown(retry_after)
+
+    client_key = hash_secret(_client_ip(request))[:24]
     if not await rate_limit(f"otp:phone:rate:{phone_hash}", 3, 600):
         raise HTTPException(status_code=429, detail="Слишком много кодов. Попробуйте позже")
     if not await rate_limit(f"otp:ip:rate:{client_key}", 12, 600):
         raise HTTPException(status_code=429, detail="Слишком много запросов")
 
+    retry_after = await _acquire_otp_cooldown(cooldown_key)
+    if retry_after:
+        _raise_otp_cooldown(retry_after)
+
     code = generate_otp()
-    await set_json(
-        f"otp:{phone_hash}",
-        {"hash": hash_secret(code), "attempts": 0},
-        settings.otp_ttl_seconds,
-    )
+    otp_key = f"otp:{phone_hash}"
     try:
+        await set_json(
+            otp_key,
+            {"hash": hash_secret(code), "attempts": 0},
+            settings.otp_ttl_seconds,
+        )
         await send_otp(phone, code)
     except Exception:
         # Do not leave a usable code behind if the user never received the SMS.
-        await redis.delete(f"otp:{phone_hash}")
+        await redis.delete(otp_key, cooldown_key)
         logger.exception("OTP delivery failed for phone ending in %s", phone[-4:])
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -95,7 +173,7 @@ async def request_code(payload: PhoneCodeRequest, request: Request) -> PhoneCode
         ) from None
     return PhoneCodeRequested(
         expires_in=settings.otp_ttl_seconds,
-        retry_after=60,
+        retry_after=OTP_RESEND_COOLDOWN_SECONDS,
         dev_code=code if not settings.is_production and not settings.smsc_is_configured else None,
     )
 
@@ -108,17 +186,17 @@ async def verify_code(payload: PhoneCodeVerify, db: DB) -> TokenPair | MFARequir
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     phone_hash = phone_lookup_hash(phone)
     key = f"otp:{phone_hash}"
-    saved = await get_json(key)
-    if not saved:
+    verification = await verify_and_consume_otp(
+        key,
+        hash_secret(payload.code),
+        settings.otp_max_attempts,
+    )
+    if verification == OtpVerificationResult.EXPIRED:
         raise HTTPException(status_code=400, detail="Код истёк")
-    if saved["attempts"] >= settings.otp_max_attempts:
-        await redis.delete(key)
+    if verification == OtpVerificationResult.ATTEMPTS_EXCEEDED:
         raise HTTPException(status_code=429, detail="Превышено число попыток")
-    if saved["hash"] != hash_secret(payload.code):
-        saved["attempts"] += 1
-        await set_json(key, saved, settings.otp_ttl_seconds)
+    if verification == OtpVerificationResult.INVALID:
         raise HTTPException(status_code=400, detail="Неверный код")
-    await redis.delete(key)
 
     user = await db.scalar(select(User).where(User.phone_hash == phone_hash))
     if not user:

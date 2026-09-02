@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -61,6 +62,11 @@ class Settings(BaseSettings):
     def smsc_is_configured(self) -> bool:
         return bool(self.smsc_login and self.smsc_password)
 
+    @property
+    def smsc_url_is_secure(self) -> bool:
+        parsed = urlparse(self.smsc_url)
+        return parsed.scheme == "https" and bool(parsed.netloc)
+
     @model_validator(mode="after")
     def load_openai_api_key_file(self) -> "Settings":
         if not self.openai_api_key_file:
@@ -88,6 +94,8 @@ class Settings(BaseSettings):
             problems.append("BN_PII_FERNET_KEY")
         if not self.smsc_is_configured:
             problems.append("BN_SMSC_LOGIN and BN_SMSC_PASSWORD")
+        if not self.smsc_url_is_secure:
+            problems.append("BN_SMSC_URL (HTTPS)")
         if len(self.s3_secret_key) < 16:
             problems.append("BN_S3_SECRET_KEY")
         if not self.public_api_url.startswith("https://"):
