@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -35,6 +36,7 @@ from app.services.cache import get_json, rate_limit, redis, set_json
 from app.services.sms import send_otp
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _tokens(user: User, refresh_token: str, *, mfa: bool = False) -> TokenPair:
@@ -81,11 +83,20 @@ async def request_code(payload: PhoneCodeRequest, request: Request) -> PhoneCode
         {"hash": hash_secret(code), "attempts": 0},
         settings.otp_ttl_seconds,
     )
-    await send_otp(phone, code)
+    try:
+        await send_otp(phone, code)
+    except Exception:
+        # Do not leave a usable code behind if the user never received the SMS.
+        await redis.delete(f"otp:{phone_hash}")
+        logger.exception("OTP delivery failed for phone ending in %s", phone[-4:])
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Не удалось отправить SMS. Попробуйте позже",
+        ) from None
     return PhoneCodeRequested(
         expires_in=settings.otp_ttl_seconds,
         retry_after=60,
-        dev_code=code if not settings.is_production and not settings.sms_provider_url else None,
+        dev_code=code if not settings.is_production and not settings.smsc_is_configured else None,
     )
 
 

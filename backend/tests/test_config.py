@@ -27,3 +27,9 @@ def test_secret_file_takes_precedence_over_explicit_openai_key(tmp_path: Path) -
     )
 
     assert loaded.openai_api_key == "sk-test-file-value-0000000000000000000000000000"
+
+
+def test_smsc_api_key_or_login_password_configures_provider() -> None:
+    assert Settings(_env_file=None, smsc_api_key="key").smsc_is_configured
+    assert Settings(_env_file=None, smsc_login="login", smsc_password="password").smsc_is_configured
+    assert not Settings(_env_file=None, smsc_login="login").smsc_is_configured
