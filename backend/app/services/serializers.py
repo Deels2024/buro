@@ -1,5 +1,6 @@
 from app.db.models import Listing, MediaObject
 from app.schemas import ListingOut, MediaOut
+from app.services.categories import normalize_category
 from app.services.storage import storage
 
 
@@ -16,7 +17,7 @@ def media_out(media: MediaObject) -> MediaOut:
     )
 
 
-def listing_out(listing: Listing) -> ListingOut:
+def listing_out(listing: Listing, *, private: bool = False) -> ListingOut:
     return ListingOut(
         id=listing.id,
         owner_id=listing.owner_id,
@@ -26,19 +27,19 @@ def listing_out(listing: Listing) -> ListingOut:
         status=listing.status,
         title=listing.title,
         description=listing.description,
-        category=listing.category,
+        category=normalize_category(listing.category),
         tags=listing.tags,
         public_features=listing.public_features,
         event_at=listing.event_at,
         public_region=listing.public_region,
         approx_latitude=listing.approx_latitude,
         approx_longitude=listing.approx_longitude,
-        storage_code=listing.storage_code,
+        storage_code=listing.storage_code if private else None,
         ai_status=listing.ai_status,
         ai_confidence=listing.ai_confidence,
         moderation_status=listing.moderation_status,
         published_at=listing.published_at,
-        media=[media_out(item) for item in listing.media if item.status != "blocked"],
+        media=[media_out(item) for item in listing.media if item.status == "ready" or (private and item.status == "processing")],
         created_at=listing.created_at,
         updated_at=listing.updated_at,
     )

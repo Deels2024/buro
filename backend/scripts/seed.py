@@ -71,6 +71,9 @@ async def seed_demo_operations(db) -> None:
         db.add(admin)
         await db.flush()
 
+    if settings.is_production or not settings.seed_demo_data:
+        return
+
     organization = await db.scalar(select(Organization).where(Organization.inn == "7800000000"))
     if not organization:
         organization = Organization(
@@ -195,10 +198,11 @@ async def seed_demo_operations(db) -> None:
 async def seed() -> None:
     async with SessionLocal() as db:
         await seed_settings(db)
-        await seed_ad(db)
+        if not settings.is_production and settings.seed_demo_data:
+            await seed_ad(db)
         await seed_demo_operations(db)
         await db.commit()
-    print("Demo data is ready")
+    print("Initial settings and administrator are ready; demo data is opt-in outside production")
 
 
 if __name__ == "__main__":

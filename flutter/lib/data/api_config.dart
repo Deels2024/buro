@@ -1,8 +1,8 @@
+import 'package:flutter/foundation.dart';
+
 class ApiConfig {
   const ApiConfig._();
-
-  static const baseUrl = String.fromEnvironment(
-    'BUREAU_API_URL',
-    defaultValue: 'http://10.0.2.2/v1',
-  );
+  static String get baseUrl => kIsWeb
+      ? Uri.base.resolve('/v1').toString()
+      : const String.fromEnvironment('BUREAU_API_URL', defaultValue: 'https://edinburo.ru/v1');
 }

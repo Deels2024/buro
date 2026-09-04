@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../core/production_widgets.dart';
 import '../../data/app_controller.dart';
 import '../../data/bureau_api_client.dart';
 import 'user_app.dart';
@@ -62,6 +64,12 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
 
   BureauApiClient get _api => AppScope.of(context, listen: false).api;
 
+  bool get _qrNeedsRefresh {
+    final token = _handover?['qr_token']?.toString();
+    final expiry = DateTime.tryParse(_handover?['qr_expires_at']?.toString() ?? '');
+    return token == null || token.isEmpty || expiry == null || !expiry.isAfter(DateTime.now());
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -86,7 +94,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     });
     try {
       _sourceListing =
-          widget.targetListing ?? await _api.listing(widget.listingId);
+          widget.targetListing ?? (widget.claimId != null ? await _api.claimListing(widget.claimId!) : await _api.listing(widget.listingId));
       if (widget.claimId != null) {
         _claim = await _api.claim(widget.claimId!);
         _step = _stepForStatus(_claim!['status']?.toString());
@@ -107,7 +115,8 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
 
   int _stepForStatus(String? status) => switch (status) {
     'draft' => 3,
-    'under_review' || 'needs_more_info' => 6,
+    'under_review' => 6,
+    'needs_more_info' => 3,
     'approved' => 7,
     'completed' => 10,
     'rejected' => 5,
@@ -191,8 +200,9 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
       case 6:
         _claim = await _api.claim(_claim!['id'].toString());
         final next = _stepForStatus(_claim!['status']?.toString());
+        _step = next;
         if (next == 7) await _loadApprovedState();
-        setState(() => _step = next);
+        if (mounted) setState(() {});
         return;
       case 7:
         _contact = await _api.setContactConsent(_claim!['id'].toString(), true);
@@ -207,19 +217,19 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
           _handoverMethod,
           _handoverPlace.text.trim(),
         );
-        if (_handover!['qr_token'] == null) {
+        if (_qrNeedsRefresh) {
           _handover = await _api.regenerateHandover(_claim!['id'].toString());
         }
         setState(() => _step = 9);
         return;
       case 9:
         final token = _handover?['qr_token']?.toString();
-        if (token == null || token.isEmpty) {
+        if (_qrNeedsRefresh) {
           _handover = await _api.regenerateHandover(_claim!['id'].toString());
           setState(() {});
           return;
         }
-        _handover = await _api.scanHandover(token);
+        _handover = {...await _api.scanHandover(token!, claimId: _claim!['id'].toString()), 'qr_token': token};
         if (_handover!['completed_at'] != null) {
           _claim = await _api.claim(_claim!['id'].toString());
           setState(() => _step = 10);
@@ -309,7 +319,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     7 => 'Обе стороны должны дать согласие',
     8 => 'Выберите безопасный способ',
     9 => 'Обе стороны сканируют один код',
-    _ => 'Передача подтверждена backend',
+    _ => 'Передача подтверждена обеими сторонами',
   };
 
   String get _buttonLabel => switch (_step) {
@@ -326,7 +336,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     7 => 'Разрешить открыть контакты',
     8 => 'Создать QR передачи',
     9 =>
-      _handover?['qr_token'] == null ? 'Обновить QR' : 'Подтвердить получение',
+      _qrNeedsRefresh ? 'Обновить QR' : 'Подтвердить получение',
     _ => 'Готово',
   };
 
@@ -712,14 +722,14 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
             borderRadius: BorderRadius.circular(26),
             border: Border.all(color: BureauColors.green),
           ),
-          child: token == null
+          child: _qrNeedsRefresh
               ? const Icon(
                   Icons.qr_code_rounded,
                   size: 180,
                   color: BureauColors.muted,
                 )
               : QrImageView(
-                  data: token,
+                  data: token!,
                   size: 220,
                   eyeStyle: const QrEyeStyle(
                     color: BureauColors.green,
@@ -728,6 +738,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
                 ),
         ),
         const SizedBox(height: 14),
+        if (_qrNeedsRefresh) const NoticeCard('Обновите QR, чтобы продолжить передачу. Уже полученные подтверждения сохранятся.'),
         SettingRow(
           icon: Icons.schedule_rounded,
           title: 'Действует до ${_handover?['qr_expires_at'] ?? ''}',
@@ -762,7 +773,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
       Text('Вещь возвращена', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 12),
       const NoticeCard(
-        'Обе стороны подтвердили передачу. Публикация закрыта, а событие записано в журнал backend.',
+        'Обе стороны подтвердили передачу. Публикация закрыта; подтверждение сохранено в истории заявления.',
         color: BureauColors.green,
         background: BureauColors.greenSoft,
       ),
@@ -785,40 +796,53 @@ class _ClaimChatState extends State<ClaimChat> {
   String? _conversationId;
   Object? _error;
   bool _loading = true;
+  bool _connecting = false, _sending = false;
+  Timer? _poll;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_conversationId == null && _loading) _connect();
+    if (_conversationId == null && _loading && !_connecting) _connect();
   }
 
   Future<void> _connect() async {
+    _connecting = true;
     final api = AppScope.of(context, listen: false).api;
     try {
       final conversation = await api.claimConversation(widget.claimId);
       _conversationId = conversation['conversation_id'].toString();
       _messages.addAll(await api.chatMessages(_conversationId!));
+      _poll ??= Timer.periodic(const Duration(seconds: 8), (_) async {
+        if (!mounted || _conversationId == null) return;
+        try {
+          final fresh = await api.chatMessages(_conversationId!);
+          if (mounted) setState(() { for (final m in fresh) { if (!_messages.any((old) => old['id'] == m['id'])) _messages.add(m); } });
+        } catch (_) { /* The next poll retries without discarding the conversation. */ }
+      });
       _channel = await api.connectChat(_conversationId!);
       _subscription = _channel!.stream.listen((event) {
         try {
-          final map = event is Map ? Map<String, dynamic>.from(event) : null;
+          final decoded = event is String ? jsonDecode(event) : event;
+          final map = decoded is Map ? Map<String, dynamic>.from(decoded) : null;
           if (map != null &&
               map['id'] != null &&
               !_messages.any((item) => item['id'] == map['id'])) {
             if (mounted) setState(() => _messages.add(map));
           }
         } catch (_) {}
-      });
+      }, onError: (Object error) { /* HTTP polling keeps the chat available. */ });
     } catch (error) {
-      _error = error;
+      if (_conversationId == null) _error = error;
     } finally {
+      _connecting = false;
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _send() async {
     final text = _message.text.trim();
-    if (text.isEmpty || _conversationId == null) return;
+    if (text.isEmpty || _conversationId == null || _sending) return;
+    setState(() => _sending = true);
     try {
       final sent = await AppScope.of(
         context,
@@ -830,11 +854,14 @@ class _ClaimChatState extends State<ClaimChat> {
       }
     } catch (error) {
       if (mounted) showApiError(context, error);
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
   @override
   void dispose() {
+    _poll?.cancel();
     _subscription?.cancel();
     _channel?.sink.close();
     _message.dispose();
@@ -859,10 +886,10 @@ class _ClaimChatState extends State<ClaimChat> {
             itemBuilder: (context, index) {
               final item = _messages[index];
               return Align(
-                alignment: Alignment.centerLeft,
+                alignment: item['sender_id'] == AppScope.of(context).currentUser?['id'] ? Alignment.centerRight : Alignment.centerLeft,
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: SoftCard(child: Text(item['body']?.toString() ?? '')),
+                  child: SoftCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(item['body']?.toString() ?? ''), Text(item['created_at']?.toString().substring(11,16) ?? '', style: Theme.of(context).textTheme.bodySmall)])),
                 ),
               );
             },
@@ -878,7 +905,7 @@ class _ClaimChatState extends State<ClaimChat> {
             ),
             const SizedBox(width: 8),
             IconButton.filled(
-              onPressed: _send,
+              onPressed: _sending ? null : _send,
               icon: const Icon(Icons.send_rounded),
             ),
           ],
@@ -917,7 +944,7 @@ class _MatchCandidateCard extends StatelessWidget {
                 background: Colors.white,
               ),
               Text(
-                '${(score * 100).round()}%',
+                '${matchPercent(score)}%',
                 style: const TextStyle(
                   color: BureauColors.green,
                   fontSize: 26,

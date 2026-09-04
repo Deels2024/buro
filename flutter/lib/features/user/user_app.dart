@@ -7,6 +7,9 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../core/production_widgets.dart';
+import 'management.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../data/app_controller.dart';
 import '../../data/bureau_api_client.dart';
 import '../admin/admin_app.dart';
@@ -394,9 +397,32 @@ class UserShell extends StatefulWidget {
 
 class _UserShellState extends State<UserShell> {
   late int _index = widget.initialIndex;
+  bool _opened = false;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final app = AppScope.of(context, listen: false);
+    if (_opened || app.initialActionHandled) return;
+    _opened = true;
+    final params = Uri.base.queryParameters;
+    final action = params['action'], id = params['listing'];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || app.initialActionHandled) return;
+      app.initialActionHandled = true;
+      Widget? target;
+      if (action == 'found' || action == 'lost') target = CreateFlowPage(initialFound: action == 'found');
+      if (action == 'claim' && id != null) target = MatchFlowPage(listingId: id);
+      if (action == 'listing' && id != null) target = ItemDetailPage(listingId: id);
+      if (action == 'support') target = const SupportCreatePage();
+      if (action == 'organization') target = const OrganizationAuthPage();
+      if (target != null) pushPage(context, target);
+    });
+  }
+
 
   @override
   Widget build(BuildContext context) {
+    if (!AppScope.of(context).isSignedIn) return const AuthPage();
     final pages = <Widget>[
       HomeView(onSearch: () => setState(() => _index = 1)),
       const SearchView(),
@@ -405,8 +431,21 @@ class _UserShellState extends State<UserShell> {
       const ProfileView(),
     ];
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
-      bottomNavigationBar: NavigationBar(
+      body: Row(children: [
+        if (MediaQuery.sizeOf(context).width >= 900) NavigationRail(
+          selectedIndex: _index, onDestinationSelected: (i) => setState(() => _index = i),
+          labelType: NavigationRailLabelType.all,
+          destinations: const [
+            NavigationRailDestination(icon: Icon(Icons.home_outlined), label: Text('Главная')),
+            NavigationRailDestination(icon: Icon(Icons.search), label: Text('Поиск')),
+            NavigationRailDestination(icon: Icon(Icons.add_circle_outline), label: Text('Добавить')),
+            NavigationRailDestination(icon: Icon(Icons.forum_outlined), label: Text('Обращения')),
+            NavigationRailDestination(icon: Icon(Icons.person_outline), label: Text('Профиль')),
+          ],
+        ),
+        Expanded(child: IndexedStack(index: _index, children: pages)),
+      ]),
+      bottomNavigationBar: MediaQuery.sizeOf(context).width >= 900 ? null : NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: const [
@@ -456,8 +495,8 @@ class _HomeViewState extends State<HomeView> {
     final api = AppScope.of(context, listen: false).api;
     return Future.wait([
       api.search(limit: 6),
-      api.notifications(limit: 10),
-      api.currentAd('home_feed'),
+      api.notifications(limit: 10).catchError((_) => <JsonMap>[]),
+      api.currentAd('home_feed').catchError((_) => null),
     ]);
   }
 
@@ -578,7 +617,7 @@ class _HomeViewState extends State<HomeView> {
                       ),
                     ],
                   ),
-                  const SectionTitle('Рядом с вами'),
+                  const SectionTitle('Последние объявления'),
                   FutureBuilder<List<dynamic>>(
                     future: _future,
                     builder: (context, snapshot) {
@@ -682,6 +721,7 @@ class _SearchViewState extends State<SearchView> {
   final _query = TextEditingController();
   Timer? _debounce;
   bool _map = false;
+  int _offset = 0;
   SearchFilters _filters = const SearchFilters();
   late Future<JsonMap> _results;
 
@@ -697,10 +737,11 @@ class _SearchViewState extends State<SearchView> {
     category: _filters.category,
     region: _filters.region,
     since: _filters.since,
-    limit: 50,
+    limit: 24,
+    offset: _offset,
   );
 
-  void _reload() => setState(() => _results = _search());
+  void _reload() => setState(() { _offset = 0; _results = _search(); });
 
   @override
   void dispose() {
@@ -826,6 +867,11 @@ class _SearchViewState extends State<SearchView> {
                             _ListingCard(listing: item),
                             const SizedBox(height: 12),
                           ],
+                        Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+                          TextButton(onPressed:_offset==0?null:()=>setState((){_offset-=24;_results=_search();}),child:const Text('Назад')),
+                          Text('Страница ${_offset~/24+1}'),
+                          TextButton(onPressed:_offset+items.length >= (data['total'] as num)?null:()=>setState((){_offset+=24;_results=_search();}),child:const Text('Далее')),
+                        ]),
                         if (items.isEmpty)
                           const NoticeCard(
                             'По выбранным условиям ничего не найдено.',
@@ -847,80 +893,8 @@ class _MapPreview extends StatelessWidget {
   const _MapPreview({required this.items, required this.onList});
   final List<JsonMap> items;
   final VoidCallback onList;
-
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          height: 390,
-          decoration: BoxDecoration(
-            color: const Color(0xFFE9EEF4),
-            borderRadius: BorderRadius.circular(26),
-          ),
-          child: Stack(
-            children: [
-              for (var index = 0; index < items.take(8).length; index++)
-                Positioned(
-                  left: 25.0 + (index * 73) % 250,
-                  top: 35.0 + (index * 61) % 250,
-                  child: GestureDetector(
-                    onTap: () => pushPage(
-                      context,
-                      ItemDetailPage(listing: items[index]),
-                    ),
-                    child: _MapPin(
-                      items[index]['kind'] == 'found' ? 'Н' : 'П',
-                      items[index]['kind'] == 'found'
-                          ? BureauColors.green
-                          : BureauColors.blue,
-                    ),
-                  ),
-                ),
-              Positioned(
-                left: 18,
-                right: 18,
-                bottom: 18,
-                child: FilledButton.tonal(
-                  onPressed: onList,
-                  child: const Text('Показать списком'),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        const NoticeCard(
-          'Координаты намеренно округлены. Точный адрес доступен только участникам подтверждённой передачи.',
-        ),
-      ],
-    );
-  }
-}
-
-class _MapPin extends StatelessWidget {
-  const _MapPin(this.label, this.color);
-  final String label;
-  final Color color;
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 54,
-    height: 54,
-    decoration: BoxDecoration(
-      color: color,
-      shape: BoxShape.circle,
-      border: Border.all(color: Colors.white, width: 4),
-    ),
-    child: Center(
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    ),
-  );
+  Widget build(BuildContext context) => ListingMap(listings: items, onOpen: (item) => pushPage(context, ItemDetailPage(listing: item)));
 }
 
 class CreateEntryView extends StatelessWidget {
@@ -1050,6 +1024,7 @@ class _CasesViewState extends State<CasesView> {
       api.myListings(),
       api.myClaims(),
       api.supportTickets(),
+      api.incomingClaims(),
     ]);
   }
 
@@ -1075,6 +1050,7 @@ class _CasesViewState extends State<CasesView> {
           final listings = snapshot.data![0] as List<JsonMap>;
           final claims = snapshot.data![1] as List<JsonMap>;
           final tickets = snapshot.data![2] as List<JsonMap>;
+          final incoming = snapshot.data![3] as List<JsonMap>;
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
             children: [
@@ -1089,6 +1065,10 @@ class _CasesViewState extends State<CasesView> {
                   BureauPill('${listings.length + claims.length} записей'),
                 ],
               ),
+              TextButton.icon(onPressed: () => setState(() { final api=AppScope.of(context,listen:false).api; _future=Future.wait([api.myListings(),api.myClaims(),api.supportTickets(),api.incomingClaims()]); }), icon: const Icon(Icons.refresh), label: const Text('Обновить')),
+              const SectionTitle('Заявки на мои находки'),
+              if(incoming.isEmpty) const NoticeCard('Входящих заявок пока нет.'),
+              for(final claim in incoming) SettingRow(icon:Icons.fact_check_outlined, title:claim['listing_title'].toString(), subtitle:stateLabel(claim['status']), onTap:()=>pushPage(context,ClaimReviewPage(claimId:claim['id'].toString()))),
               const SectionTitle('Мои публикации'),
               for (final listing in listings) ...[
                 SettingRow(
@@ -1097,19 +1077,14 @@ class _CasesViewState extends State<CasesView> {
                       : Icons.volunteer_activism_rounded,
                   title: listing['title']?.toString() ?? 'Без названия',
                   subtitle:
-                      '${listing['public_region']} · ${listing['status']}',
+                      '${listing['public_region']} · ${stateLabel(listing['status'])}',
                   color: listing['kind'] == 'found'
                       ? BureauColors.green
                       : BureauColors.blue,
                   background: listing['kind'] == 'found'
                       ? BureauColors.greenSoft
                       : BureauColors.blueSoft,
-                  onTap: () => listing['kind'] == 'lost'
-                      ? pushPage(
-                          context,
-                          MatchFlowPage(listingId: listing['id'].toString()),
-                        )
-                      : pushPage(context, ItemDetailPage(listing: listing)),
+                  onTap: () => pushPage(context, EditListingPage(listingId: listing['id'].toString())),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -1120,7 +1095,7 @@ class _CasesViewState extends State<CasesView> {
                 SettingRow(
                   icon: Icons.fact_check_outlined,
                   title: 'Заявление ${claim['id'].toString().substring(0, 8)}',
-                  subtitle: 'Статус: ${claim['status']}',
+                  subtitle: 'Статус: ${stateLabel(claim['status'])}',
                   color: claim['status'] == 'approved'
                       ? BureauColors.green
                       : BureauColors.amber,
@@ -1308,14 +1283,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         final found =
             listing?['kind'] == 'found' ||
             (listing == null && widget.found == true);
+        final own = listing != null && listing['owner_id'] == AppScope.of(context).currentUser?['id'];
         final accent = found ? BureauColors.green : BureauColors.blue;
         final soft = found ? BureauColors.greenSoft : BureauColors.blueSoft;
         return BureauPage(
           title: found ? 'Найдена вещь' : 'Потеряна вещь',
           subtitle: listing == null
               ? 'Загрузка публикации'
-              : '${listing['public_region']} · ${listing['status']}',
+              : '${listing['public_region']} · ${stateLabel(listing['status'])}',
           actions: [
+            if (listing != null) IconButton(tooltip:'Поделиться ссылкой', icon:const Icon(Icons.link), onPressed:()=>launchUrl(Uri.parse('https://edinburo.ru/items/${listing['id']}/'))),
             IconButton(
               onPressed: listing == null
                   ? null
@@ -1342,16 +1319,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               ? null
               : FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: accent),
-                  onPressed: () => pushPage(
-                    context,
-                    MatchFlowPage(
-                      listingId: listing['id'].toString(),
-                      targetListing: listing,
-                    ),
-                  ),
-                  child: Text(
-                    found ? 'Это может быть моё' : 'Посмотреть совпадения',
-                  ),
+                  onPressed: () => pushPage(context, own
+                    ? EditListingPage(listingId: listing['id'].toString())
+                    : found ? MatchFlowPage(listingId: listing['id'].toString(), targetListing: listing)
+                    : const CreateFlowPage(initialFound: true)),
+                  child: Text(own ? 'Управлять публикацией' : found ? 'Это может быть моё' : 'Сообщить о находке'),
                 ),
           child: snapshot.connectionState != ConnectionState.done
               ? const Center(child: CircularProgressIndicator())
@@ -1371,6 +1343,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                       height: 300,
                     ),
                     const SizedBox(height: 14),
+                    PhotoGallery(media: (listing['media'] as List? ?? []).map((m)=>Map<String,dynamic>.from(m as Map)).toList()),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -1438,14 +1411,7 @@ class MatchExplanationPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rows = factors.isEmpty
-        ? const {
-            'Форма и силуэт': .96,
-            'Основной цвет': .94,
-            'Место': .82,
-            'Дата': .78,
-          }
-        : factors;
+    final rows = factors;
     return BureauPage(
       title: 'Почему совпадает',
       subtitle: 'ИИ объясняет оценку',
@@ -1462,7 +1428,7 @@ class MatchExplanationPage extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${(((row.value as num?) ?? 0) * 100).round()}%',
+                  '${matchPercent(row.value)}%',
                   style: const TextStyle(
                     color: BureauColors.green,
                     fontWeight: FontWeight.w900,
@@ -1472,7 +1438,7 @@ class MatchExplanationPage extends StatelessWidget {
             ),
             const SizedBox(height: 7),
             LinearProgressIndicator(
-              value: ((row.value as num?) ?? 0).toDouble().clamp(0, 1),
+              value: matchPercent(row.value) / 100,
               backgroundColor: BureauColors.line,
               color: BureauColors.green,
               borderRadius: BorderRadius.circular(99),
@@ -1564,10 +1530,8 @@ class _SearchFiltersPageState extends State<SearchFiltersPage> {
         const SectionTitle('Категория'),
         DropdownButtonFormField<String>(
           initialValue: _category,
-          items: const ['Сумки', 'Документы', 'Электроника', 'Ключи', 'Одежда']
-              .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-              .toList(),
-          onChanged: (value) => setState(() => _category = value),
+          items: [const DropdownMenuItem<String>(value: '', child: Text('Все категории')), ...categoryLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))],
+          onChanged: (value) => setState(() => _category = value == '' ? null : value),
           decoration: const InputDecoration(hintText: 'Любая категория'),
         ),
         const SectionTitle('Регион'),
@@ -1825,18 +1789,22 @@ class ProfileSecurityPage extends StatefulWidget {
 }
 
 class _ProfileSecurityPageState extends State<ProfileSecurityPage> {
-  late final TextEditingController _name;
+  final TextEditingController _name = TextEditingController();
+  bool _initialized = false;
   late Future<List<JsonMap>> _sessions;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final app = AppScope.of(context, listen: false);
-    _name = TextEditingController(
-      text: app.currentUser?['display_name']?.toString(),
-    );
+    if (_initialized) return;
+    _initialized = true;
+    _name.text = app.currentUser?['display_name']?.toString() ?? '';
     _sessions = app.api.sessions();
   }
+
+  @override
+  void dispose() { _name.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => BureauPage(
@@ -2016,12 +1984,15 @@ class _SupportChatPageState extends State<SupportChatPage> {
         const SizedBox(width: 8),
         IconButton.filled(
           onPressed: () async {
+            if (_message.text.trim().isEmpty) return;
+            try {
             await AppScope.of(context, listen: false).api.sendSupportMessage(
               widget.ticket['id'].toString(),
               _message.text,
             );
             _message.clear();
-            _reload();
+            if (mounted) _reload();
+            } catch(e) { if(context.mounted)showApiError(context,e); }
           },
           icon: const Icon(Icons.send_rounded),
         ),

@@ -1,5 +1,7 @@
 "use client";
 
+import { MediaGallery, OperationalDrawer, TrafficCounts } from "./operations";
+
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type NavKey =
@@ -46,7 +48,7 @@ type UserRow = {
   id: string; display_name: string; phone_masked: string; role: string; status: string;
   admin_2fa_enabled: boolean; verified_at: string | null; last_seen_at: string | null; created_at: string;
 };
-type ModerationRow = { id: string; title: string; kind: string; category: string; created_at: string };
+type ModerationRow = { id: string; title: string; description: string; kind: string; category: string; created_at: string; media: { id: string; download_url: string; mime_type: string; status: string }[] };
 type TicketRow = {
   id: string; subject: string; category: string; priority: string; status: string;
   assigned_to: string | null; created_at: string; updated_at: string;
@@ -62,7 +64,7 @@ type Health = { status: string; database: string; redis: string; version: string
 
 const navigation: { key: NavKey; label: string; icon: string }[] = [
   { key: "overview", label: "Главная", icon: "⌂" },
-  { key: "items", label: "Находки", icon: "◇" },
+  { key: "items", label: "Публикации", icon: "◇" },
   { key: "claims", label: "Заявки о пропаже", icon: "⌕" },
   { key: "matches", label: "ИИ-совпадения", icon: "✦" },
   { key: "organizations", label: "Организации", icon: "▦" },
@@ -76,7 +78,7 @@ const navigation: { key: NavKey; label: string; icon: string }[] = [
 
 const sectionTitles: Record<NavKey, { title: string; subtitle: string }> = {
   overview: { title: "Операционный центр", subtitle: "Живые данные всей сети" },
-  items: { title: "Реестр находок", subtitle: "Все найденные вещи в подключённых организациях" },
+  items: { title: "Реестр публикаций", subtitle: "Пропажи и находки пользователей и организаций" },
   claims: { title: "Заявки о пропаже", subtitle: "Единая очередь обращений пользователей" },
   matches: { title: "ИИ-совпадения", subtitle: "Проверка рекомендаций и подтверждение совпадений" },
   organizations: { title: "Организации", subtitle: "Партнёры, API и объём реестра" },
@@ -135,7 +137,7 @@ function Status({ children, tone = "gray" }: { children: ReactNode; tone?: strin
 
 function Login({ onDone }: { onDone: (user: SessionUser) => void }) {
   const [step, setStep] = useState<"phone" | "code" | "mfa">("phone");
-  const [phone, setPhone] = useState("+79990000000");
+  const [phone, setPhone] = useState("+7");
   const [code, setCode] = useState("");
   const [devCode, setDevCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -263,6 +265,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   const [dashboard, setDashboard] = useState<Record<string, number>>({});
   const [records, setRecords] = useState<unknown[]>([]);
   const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
@@ -289,29 +292,27 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
         setRecords([]);
       } else if (key === "items") {
         const suffix = search ? "&query=" + encodeURIComponent(search) : "";
-        const data = await jsonRequest<PageResponse<ListingRow>>("/api/backend/admin/listings?kind=found&limit=50" + suffix);
+        const data = await jsonRequest<PageResponse<ListingRow>>("/api/backend/admin/listings?limit=50&offset=" + offset + suffix);
         setRecords(data.items); setTotal(data.total);
       } else if (key === "claims") {
-        const data = await jsonRequest<PageResponse<ClaimRow>>("/api/backend/admin/claims?limit=50");
-        const term = search.toLowerCase();
-        const filtered = term ? data.items.filter((item) => JSON.stringify(item).toLowerCase().includes(term)) : data.items;
-        setRecords(filtered); setTotal(data.total);
+        const data = await jsonRequest<PageResponse<ClaimRow>>("/api/backend/admin/claims?limit=50&offset=" + offset + "&query=" + encodeURIComponent(search));
+        setRecords(data.items); setTotal(data.total);
       } else if (key === "matches") {
-        const data = await jsonRequest<PageResponse<MatchRow>>("/api/backend/admin/matches?limit=50");
+        const data = await jsonRequest<PageResponse<MatchRow>>("/api/backend/admin/matches?limit=50&offset=" + offset);
         setRecords(data.items); setTotal(data.total);
       } else if (key === "organizations") {
         const suffix = search ? "&query=" + encodeURIComponent(search) : "";
-        const data = await jsonRequest<PageResponse<OrganizationRow>>("/api/backend/admin/organizations?limit=50" + suffix);
+        const data = await jsonRequest<PageResponse<OrganizationRow>>("/api/backend/admin/organizations?limit=50&offset=" + offset + suffix);
         setRecords(data.items); setTotal(data.total);
       } else if (key === "users") {
         const suffix = search ? "&query=" + encodeURIComponent(search) : "";
-        const data = await jsonRequest<PageResponse<UserRow>>("/api/backend/admin/users?limit=50" + suffix);
+        const data = await jsonRequest<PageResponse<UserRow>>("/api/backend/admin/users?limit=50&offset=" + offset + suffix);
         setRecords(data.items); setTotal(data.total);
       } else if (key === "moderation") {
         const data = await jsonRequest<ModerationRow[]>("/api/backend/admin/moderation/listings?limit=100");
         setRecords(data); setTotal(data.length);
       } else if (key === "support") {
-        const data = await jsonRequest<PageResponse<TicketRow>>("/api/backend/admin/support/tickets?limit=50");
+        const data = await jsonRequest<PageResponse<TicketRow>>("/api/backend/admin/support/tickets?limit=50&offset=" + offset);
         setRecords(data.items); setTotal(data.total);
       } else if (key === "integrations") {
         const [healthResult, organizationsResult] = await Promise.all([
@@ -328,7 +329,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
     } finally {
       setLoading(false);
     }
-  }, [loadSummary]);
+  }, [loadSummary, offset]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadSection(section, query); }, 220);
@@ -347,7 +348,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   }, []);
 
   function navigate(key: NavKey) {
-    setSection(key); setQuery(""); setMenuOpen(false); setSelected(null); setNotice("");
+    setSection(key); setOffset(0); setQuery(""); setMenuOpen(false); setSelected(null); setNotice("");
   }
 
   async function action(path: string, init: RequestInit, message: string) {
@@ -383,7 +384,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
       <section className="workspace">
         <header className="topbar">
           <button className="mobile-menu" aria-label="Открыть меню" onClick={() => setMenuOpen(true)}>☰</button>
-          <div className="global-search"><span aria-hidden="true">⌕</span><input ref={searchRef} aria-label="Поиск по текущему разделу" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder} /><kbd>⌘ K</kbd></div>
+          <div className="global-search"><span aria-hidden="true">⌕</span><input ref={searchRef} aria-label="Поиск по текущему разделу" value={query} onChange={(event) => {setOffset(0); setQuery(event.target.value);}} placeholder={searchPlaceholder} /><kbd>⌘ K</kbd></div>
           <div className="top-actions"><button className="sync" onClick={() => void loadSection(section, query)}><i />Обновить данные</button><button className="notification" aria-label="Открытые обращения" onClick={() => navigate("support")}>◌<b>{analytics?.operations.support_open ?? 0}</b></button></div>
         </header>
         <div className="content" id="admin-content" role="main">
@@ -398,14 +399,15 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
           {section === "organizations" && <Organizations rows={records as OrganizationRow[]} total={total} onAction={action} />}
           {section === "users" && <Users rows={records as UserRow[]} total={total} onAction={action} />}
           {section === "moderation" && <Moderation rows={records as ModerationRow[]} onAction={action} />}
-          {section === "support" && <Support rows={records as TicketRow[]} total={total} onAction={action} />}
+          {section === "support" && <Support rows={records as TicketRow[]} total={total} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
           {section === "integrations" && <Integrations health={health} organizations={records as OrganizationRow[]} analytics={analytics} />}
-          {section === "analytics" && <Analytics analytics={analytics} />}
+          {section === "analytics" && <><TrafficCounts/><Analytics analytics={analytics} /></>}
+          {["items","claims","matches","organizations","users","support"].includes(section) && <nav className="modal-actions" aria-label="Страницы реестра"><button className="filter-button" disabled={offset===0||loading} onClick={()=>setOffset(Math.max(0,offset-50))}>Назад</button><span>{offset+1}–{Math.min(offset+50,total)} из {number(total)}</span><button className="filter-button" disabled={offset+50>=total||loading} onClick={()=>setOffset(offset+50)}>Далее</button></nav>}
           {section === "settings" && <Settings rows={records as SettingRow[]} onAction={action} />}
         </div>
       </section>
-      {selected && <DetailDrawer data={selected} onClose={() => setSelected(null)} />}
-      {addOpen && <AddModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); setNotice("Черновик находки создан в backend. Добавьте фотографию перед публикацией."); void loadSection(section, query); void loadSummary(); }} />}
+      {selected && ["items", "claims", "support"].includes(section) ? <OperationalDrawer key={String(selected.id)} id={String(selected.id)} kind={section === "claims" ? "claim" : section === "support" ? "ticket" : "listing"} onClose={() => setSelected(null)} onChanged={() => {void loadSection(section,query); void loadSummary();}} /> : selected && <DetailDrawer data={selected} onClose={() => setSelected(null)} />}
+      {addOpen && <AddModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); setNotice("Черновик создан. Откройте карточку в реестре, добавьте фотографии и отправьте её на модерацию."); void loadSection(section, query); void loadSummary(); }} />}
     </main>
   );
 }
@@ -414,12 +416,12 @@ function Listings({ rows, total, onOpen }: { rows: ListingRow[]; total: number; 
   return <DataTable><div className="registry-tools"><div><strong>{number(total)}</strong><span> находок в реестре</span></div><a className="filter-button" href="/api/backend/admin/exports/overview.csv">⇩ Экспорт CSV</a></div><div className="data-table"><div className="data-row data-head"><span>ID</span><span>Предмет</span><span>Регион</span><span>Дата</span><span>Статус</span><span>Модерация</span><span /></div>{rows.map((row) => <button className="data-row" key={row.id} onClick={() => onOpen(row)}><code>{row.id.slice(0, 8)}</code><span className="item-cell"><i>{row.title.slice(0, 1)}</i><span><strong>{row.title}</strong><small>{row.category}</small></span></span><span>{row.region || "Не указан"}</span><span>{formatDate(row.created_at)}</span><Status tone={statusTone(row.status)}>{statusName(row.status)}</Status><Status tone={statusTone(row.moderation_status)}>{statusName(row.moderation_status)}</Status><span className="arrow">›</span></button>)}{!rows.length && <Empty />}</div></DataTable>;
 }
 
-function Claims({ rows, total, onAction, onOpen }: { rows: ClaimRow[]; total: number; onAction: (path: string, init: RequestInit, message: string) => void; onOpen: (row: ClaimRow) => void }) {
-  return <DataTable><div className="registry-tools"><div><strong>{number(total)}</strong><span> заявлений</span></div></div><div className="claim-table"><div className="claim-row claim-head"><span>ID</span><span>Карточка</span><span>Риск</span><span>Создано</span><span>Статус</span><span>Действия</span></div>{rows.map((row) => <div className="claim-row" key={row.id}><button className="link-id" onClick={() => onOpen(row)}>{row.id.slice(0, 8)}</button><code>{row.listing_id.slice(0, 8)}</code><strong className={row.risk_score >= .6 ? "risk-high" : "risk-low"}>{Math.round(row.risk_score * 100)}%</strong><span>{formatDate(row.created_at)}</span><Status tone={statusTone(row.status)}>{statusName(row.status)}</Status><div className="row-actions"><button className="filter-button" disabled={!["under_review", "needs_more_info"].includes(row.status)} onClick={() => void onAction("/claims/" + row.id + "/decision", { method: "POST", body: JSON.stringify({ decision: "rejected", reason: "Отклонено администратором после проверки" }) }, "Заявление отклонено")}>Отклонить</button><button className="primary-button" disabled={!["under_review", "needs_more_info"].includes(row.status)} onClick={() => void onAction("/claims/" + row.id + "/decision", { method: "POST", body: JSON.stringify({ decision: "approved", reason: "Владение подтверждено администратором" }) }, "Владелец подтверждён")}>Подтвердить</button></div></div>)}{!rows.length && <Empty />}</div></DataTable>;
+function Claims({ rows, total, onOpen }: { rows: ClaimRow[]; total: number; onAction: (path: string, init: RequestInit, message: string) => void; onOpen: (row: ClaimRow) => void }) {
+  return <section className="panel"><h2>Заявлений: {number(total)}</h2>{rows.map(row=><article className="ticket-row" key={row.id}><span><strong>Заявление {row.id.slice(0,8)}</strong><small>{formatDate(row.created_at)} · Риск {Math.round(row.risk_score*100)}%</small></span><Status>{statusName(row.status)}</Status><button className="primary-button" disabled={row.status === "draft"} onClick={()=>onOpen(row)}>Проверить доказательства</button></article>)}{!rows.length&&<Empty/>}</section>;
 }
 
 function Matches({ rows, onAction, onOpen }: { rows: MatchRow[]; onAction: (path: string, init: RequestInit, message: string) => void; onOpen: (row: MatchRow) => void }) {
-  return <section className="matches-board">{rows.map((row) => <article className="match-card" key={row.id}><div className="match-top"><div><Status tone={row.score >= 80 ? "green" : "amber"}>{row.score >= 80 ? "Высокая вероятность" : "Требует проверки"}</Status><span>{formatDate(row.created_at)}</span></div><strong className="big-score">{row.score.toFixed(1)}%</strong></div><div className="comparison"><div className="compare-side"><span className="compare-image c1">П</span><div><small>ПОТЕРЯНО</small><h3>{row.source_listing_id.slice(0, 8)}</h3><p>Исходная карточка</p></div></div><div className="match-link"><i>✦</i><span>ИИ</span></div><div className="compare-side claim-side"><span className="compare-image c4">Н</span><div><small>НАЙДЕНО</small><h3>{row.candidate_listing_id.slice(0, 8)}</h3><p>Кандидат на совпадение</p></div></div></div><div className="match-reasons">{Object.entries(row.factors ?? {}).map(([key, value]) => <span key={key}>{key} <b>{Math.round(Number(value) * 100)}%</b></span>)}</div><div className="match-actions"><button className="filter-button" onClick={() => onOpen(row)}>Детали</button><div><button className="danger-button" disabled={row.status === "rejected"} onClick={() => void onAction("/listings/" + row.source_listing_id + "/matches/" + row.id, { method: "PATCH", body: JSON.stringify({ status: "rejected" }) }, "Совпадение отклонено")}>Отклонить</button><button className="primary-button" disabled={row.status === "accepted"} onClick={() => void onAction("/listings/" + row.source_listing_id + "/matches/" + row.id, { method: "PATCH", body: JSON.stringify({ status: "accepted" }) }, "Совпадение принято")}>Принять совпадение</button></div></div></article>)}{!rows.length && <section className="panel"><Empty /></section>}</section>;
+  return <section className="matches-board">{rows.map((row) => <article className="match-card" key={row.id}><div className="match-top"><div><Status tone={row.score >= 80 ? "green" : "amber"}>{row.score >= 80 ? "Высокая вероятность" : "Требует проверки"}</Status><span>{formatDate(row.created_at)}</span></div><strong className="big-score">{row.score.toFixed(1)}%</strong></div><div className="comparison"><div className="compare-side"><span className="compare-image c1">П</span><div><small>ПОТЕРЯНО</small><h3>{row.source_listing_id.slice(0, 8)}</h3><p>Исходная карточка</p></div></div><div className="match-link"><i>✦</i><span>ИИ</span></div><div className="compare-side claim-side"><span className="compare-image c4">Н</span><div><small>НАЙДЕНО</small><h3>{row.candidate_listing_id.slice(0, 8)}</h3><p>Кандидат на совпадение</p></div></div></div><div className="match-reasons">{Object.entries(row.factors ?? {}).map(([key, value]) => <span key={key}>{key} <b>{Math.round(Math.min(100, Number(value) <= 1 ? Number(value) * 100 : Number(value)))}%</b></span>)}</div><div className="match-actions"><button className="filter-button" onClick={() => onOpen(row)}>Детали</button><div><button className="danger-button" disabled={row.status === "rejected"} onClick={() => void onAction("/listings/" + row.source_listing_id + "/matches/" + row.id, { method: "PATCH", body: JSON.stringify({ status: "rejected" }) }, "Совпадение отклонено")}>Отклонить</button><button className="primary-button" disabled={row.status === "accepted"} onClick={() => void onAction("/listings/" + row.source_listing_id + "/matches/" + row.id, { method: "PATCH", body: JSON.stringify({ status: "accepted" }) }, "Совпадение принято")}>Принять совпадение</button></div></div></article>)}{!rows.length && <section className="panel"><Empty /></section>}</section>;
 }
 
 function Organizations({ rows, total, onAction }: { rows: OrganizationRow[]; total: number; onAction: (path: string, init: RequestInit, message: string) => void }) {
@@ -431,11 +433,11 @@ function Users({ rows, total, onAction }: { rows: UserRow[]; total: number; onAc
 }
 
 function Moderation({ rows, onAction }: { rows: ModerationRow[]; onAction: (path: string, init: RequestInit, message: string) => void }) {
-  return <section className="moderation-layout"><div className="moderation-queue">{rows.map((row) => <article className="panel moderation-card" key={row.id}><span className="compare-image c2">{row.title.slice(0, 1)}</span><div><Status tone="amber">Проверка</Status><h3>{row.title}</h3><p>{row.category} · {statusName(row.kind)}</p><small>{row.id.slice(0, 8)} · {formatDate(row.created_at)}</small></div><div><button className="filter-button" onClick={() => void onAction("/admin/moderation/listings/" + row.id, { method: "POST", body: JSON.stringify({ decision: "reject", reason: "Карточка не соответствует правилам публикации" }) }, "Карточка отклонена")}>Отклонить</button><button className="primary-button" onClick={() => void onAction("/admin/moderation/listings/" + row.id, { method: "POST", body: JSON.stringify({ decision: "approve", reason: "Карточка проверена администратором" }) }, "Карточка одобрена")}>Одобрить</button></div></article>)}{!rows.length && <section className="panel"><Empty text="Очередь модерации пуста" /></section>}</div><aside className="panel moderation-stats"><h2>Текущая очередь</h2><div><strong>{rows.length}</strong><span>ожидают решения</span></div><div><strong>API</strong><span>действия сохраняются</span></div><div><strong>Audit</strong><span>решения журналируются</span></div></aside></section>;
+  return <section className="moderation-layout"><div className="moderation-queue">{rows.map((row) => <article className="panel moderation-card" key={row.id}><div><MediaGallery media={row.media ?? []}/><p>{row.description}</p></div><div><Status tone="amber">Проверка</Status><h3>{row.title}</h3><p>{row.category} · {statusName(row.kind)}</p><small>{row.id.slice(0, 8)} · {formatDate(row.created_at)}</small></div><div><button className="filter-button" onClick={() => void onAction("/admin/moderation/listings/" + row.id, { method: "POST", body: JSON.stringify({ decision: "reject", reason: "Карточка не соответствует правилам публикации" }) }, "Карточка отклонена")}>Отклонить</button><button className="primary-button" onClick={() => void onAction("/admin/moderation/listings/" + row.id, { method: "POST", body: JSON.stringify({ decision: "approve", reason: "Карточка проверена администратором" }) }, "Карточка одобрена")}>Одобрить</button></div></article>)}{!rows.length && <section className="panel"><Empty text="Очередь модерации пуста" /></section>}</div><aside className="panel moderation-stats"><h2>Текущая очередь</h2><div><strong>{rows.length}</strong><span>ожидают решения</span></div><div><strong>API</strong><span>действия сохраняются</span></div><div><strong>Audit</strong><span>решения журналируются</span></div></aside></section>;
 }
 
-function Support({ rows, total, onAction }: { rows: TicketRow[]; total: number; onAction: (path: string, init: RequestInit, message: string) => void }) {
-  return <section className="support-layout"><div className="panel ticket-list"><div className="panel-head"><div><h2>Обращения</h2><p>{number(total)} в реестре</p></div></div>{rows.map((row) => <div className="ticket-row" key={row.id}><span className="avatar">{row.subject.slice(0, 1)}</span><span><strong>{row.category}</strong><b>{row.subject}</b><small>{row.id.slice(0, 8)} · {formatDate(row.updated_at)}</small></span><Status tone={statusTone(row.priority)}>{statusName(row.status)}</Status></div>)}{!rows.length && <Empty />}</div><div className="panel chat-preview"><div className="chat-head"><div><strong>Операции с обращениями</strong><small>Все изменения записываются в аудит</small></div></div><div className="chat-body">{rows.slice(0, 5).map((row) => <div className="support-action" key={row.id}><div><strong>{row.subject}</strong><small>{statusName(row.priority)} приоритет · {statusName(row.status)}</small></div><button className="primary-button" disabled={["resolved", "closed"].includes(row.status)} onClick={() => void onAction("/admin/support/tickets/" + row.id, { method: "PATCH", body: JSON.stringify({ status: "resolved" }) }, "Обращение закрыто")}>Решено</button></div>)}</div></div></section>;
+function Support({ rows, total, onOpen }: { rows: TicketRow[]; total: number; onOpen: (row: TicketRow) => void }) {
+  return <section className="panel"><h2>Обращений: {number(total)}</h2>{rows.map(row=><article className="ticket-row" key={row.id}><span><strong>{row.subject}</strong><small>{formatDate(row.updated_at)}</small></span><Status>{statusName(row.status)}</Status><button className="primary-button" onClick={()=>onOpen(row)}>Читать и ответить</button></article>)}{!rows.length&&<Empty/>}</section>;
 }
 
 function Integrations({ health, organizations, analytics }: { health: Health | null; organizations: OrganizationRow[]; analytics: AnalyticsData | null }) {
@@ -483,7 +485,7 @@ function AddModal({ onClose, onCreated }: { onClose: () => void; onCreated: () =
       setError(caught instanceof Error ? caught.message : "Не удалось создать находку");
     } finally { setBusy(false); }
   }
-  return <div className="overlay modal-overlay" onMouseDown={onClose}><form className="modal" role="dialog" aria-modal="true" aria-label="Новая находка" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="drawer-head"><div><small>BACKEND API</small><h2>Новая находка</h2></div><button type="button" aria-label="Закрыть форму" onClick={onClose}>×</button></div><div className="form-grid"><label><span>Название</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} minLength={3} required /></label><label><span>Категория</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}><option value="personal">Личные вещи</option><option value="electronics">Электроника</option><option value="documents">Документы</option><option value="bags">Сумки</option><option value="keys">Ключи</option></select></label><label className="wide"><span>Описание</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} minLength={10} required /></label><label><span>Регион</span><input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} required /></label><label><span>Точное место</span><input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label className="wide"><span>Код хранения</span><input value={form.storage} onChange={(event) => setForm({ ...form, storage: event.target.value })} placeholder="Например, A-104" /></label></div>{error && <div className="form-error">{error}</div>}<div className="modal-actions"><button type="button" className="filter-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Создаём…" : "Создать в backend"}</button></div></form></div>;
+  return <div className="overlay modal-overlay" onMouseDown={onClose}><form className="modal" role="dialog" aria-modal="true" aria-label="Новая находка" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="drawer-head"><div><small>ПУБЛИКАЦИЯ</small><h2>Новая находка</h2></div><button type="button" aria-label="Закрыть форму" onClick={onClose}>×</button></div><div className="form-grid"><label><span>Название</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} minLength={3} required /></label><label><span>Категория</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}><option value="personal">Личные вещи</option><option value="electronics">Электроника</option><option value="documents">Документы</option><option value="bags">Сумки</option><option value="keys">Ключи</option></select></label><label className="wide"><span>Описание</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} minLength={10} required /></label><label><span>Регион</span><input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} required /></label><label><span>Точное место</span><input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label><label className="wide"><span>Код хранения</span><input value={form.storage} onChange={(event) => setForm({ ...form, storage: event.target.value })} placeholder="Например, A-104" /></label></div>{error && <div className="form-error">{error}</div>}<div className="modal-actions"><button type="button" className="filter-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Создаём…" : "Сохранить черновик"}</button></div></form></div>;
 }
 
 function Empty({ text = "В базе пока нет записей" }: { text?: string }) {
@@ -503,7 +505,7 @@ export default function Home() {
     await fetch("/api/session/logout", { method: "POST" });
     setUser(null);
   }
-  if (checking) return <main className="login-shell"><div className="boot-loader"><span className="brand-mark">БН</span><p>Подключаемся к backend…</p></div></main>;
+  if (checking) return <main className="login-shell"><div className="boot-loader"><span className="brand-mark">БН</span><p>Загружаем кабинет…</p></div></main>;
   if (!user) return <Login onDone={setUser} />;
   return <AdminConsole user={user} onLogout={() => void logout()} />;
 }

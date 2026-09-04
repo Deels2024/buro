@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
+mkdir -p .releases
+exec 9>.releases/operation.lock
+flock -n 9 || { echo "Deployment or backup is already running." >&2; exit 1; }
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Не найден Docker. Установите Docker Engine и повторите запуск."
@@ -46,11 +50,47 @@ if grep -q "__POSTGRES_PASSWORD__" .env; then replace_placeholder "__POSTGRES_PA
 if grep -q "__MINIO_PASSWORD__" .env; then replace_placeholder "__MINIO_PASSWORD__" "$(random_hex)"; fi
 
 . ./.env
+chmod 600 .env
+export BN_RELEASE_SHA="$(git rev-parse HEAD)"
 
 if [ "${BN_ENVIRONMENT:-development}" = "production" ]; then
+  # Upgrade only known addresses from earlier installs of this same project.
+  # Existing custom HTTPS endpoints and all credentials are left intact.
+  public_setting() {
+    if grep -q "^$1=" .env; then
+      sed -i "s|^$1=.*|$1=$2|" .env
+    else
+      printf '%s=%s\n' "$1" "$2" >> .env
+    fi
+  }
+  case "${PUBLIC_BASE_URL:-}" in
+    http://localhost|http://5.183.191.139:8088|http://edinburo.ru)
+      public_setting PUBLIC_BASE_URL https://edinburo.ru ;;
+  esac
+  case "${S3_PUBLIC_URL:-}" in
+    http://localhost:9000|http://5.183.191.139:9000|http://edinburo.ru:9000)
+      public_setting S3_PUBLIC_URL https://edinburo.ru ;;
+  esac
+  case "${ADMIN_BASE_URL:-}" in
+    http://admin.localhost|http://admin.edinburo.ru)
+      public_setting ADMIN_BASE_URL https://admin.edinburo.ru ;;
+  esac
+  public_setting ADMIN_COOKIE_SECURE true
+  . ./.env
   if [ -z "${BN_SMSC_LOGIN:-}" ] || [ -z "${BN_SMSC_PASSWORD:-}" ]; then
     echo "Production SMSC credentials are missing: set BN_SMSC_LOGIN and BN_SMSC_PASSWORD in .env." >&2
     exit 1
+  fi
+  case "${PUBLIC_BASE_URL:-}" in
+    https://*) ;;
+    *) echo "Production PUBLIC_BASE_URL must be the canonical HTTPS domain." >&2; exit 1 ;;
+  esac
+  case "${S3_PUBLIC_URL:-}" in
+    https://*) ;;
+    *) echo "Set S3_PUBLIC_URL=https://edinburo.ru for signed uploads through the gateway." >&2; exit 1 ;;
+  esac
+  if [ "${ADMIN_COOKIE_SECURE:-false}" != "true" ]; then
+    echo "Production ADMIN_COOKIE_SECURE must be true." >&2; exit 1
   fi
   case "${BN_SMSC_URL:-https://smsc.ru/sys/send.php}" in
     https://*) ;;
@@ -62,7 +102,19 @@ if [ "${BN_ENVIRONMENT:-development}" = "production" ]; then
 fi
 
 docker compose config --quiet
-docker compose up -d --build --wait --wait-timeout "${INSTALL_WAIT_TIMEOUT:-300}"
+# Build all images before replacing healthy containers. Never print success after a failed build.
+COMPOSE_PARALLEL_LIMIT=1 docker compose build
+mkdir -p .releases
+chmod 700 .releases
+if [ -f .releases/current ]; then cp .releases/current .releases/previous; fi
+cp docker-compose.yml ".releases/$BN_RELEASE_SHA.compose.yml"
+cp nginx/default.conf ".releases/$BN_RELEASE_SHA.nginx.conf"
+if ! docker compose up -d --no-build --wait --wait-timeout "${INSTALL_WAIT_TIMEOUT:-300}"; then
+  echo "Release activation failed. Previous images are retained for scripts/rollback.sh." >&2
+  exit 1
+fi
+./scripts/check-release.sh "$BN_RELEASE_SHA"
+printf '%s\n' "$BN_RELEASE_SHA" > .releases/current
 
 if [ "${BN_ENVIRONMENT:-development}" != "production" ]; then
   docker compose exec -T \

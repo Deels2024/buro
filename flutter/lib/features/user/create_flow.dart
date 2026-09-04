@@ -4,6 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../core/production_widgets.dart';
+import 'package:latlong2/latlong.dart';
 import '../../data/app_controller.dart';
 import '../../data/bureau_api_client.dart';
 import 'match_flow.dart';
@@ -32,7 +34,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   late bool _found = widget.initialFound;
   final _title = TextEditingController();
   final _description = TextEditingController();
-  final _category = TextEditingController();
+  final _category = TextEditingController(text: 'other');
   final _features = TextEditingController();
   final _hidden = TextEditingController();
   final _region = TextEditingController();
@@ -45,6 +47,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   final List<XFile> _files = [];
   bool _uploading = false;
   bool _describing = false;
+  LatLng? _point;
 
   Color get _accent => _found ? BureauColors.green : BureauColors.blue;
   Color get _soft => _found ? BureauColors.greenSoft : BureauColors.blueSoft;
@@ -67,6 +70,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   }
 
   Future<void> _pickImages() async {
+    if (_media.length >= 8 || _uploading) return;
     final files = await ImagePicker().pickMultiImage(
       imageQuality: 88,
       maxWidth: 2048,
@@ -111,7 +115,8 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       _title.text = result['title']?.toString() ?? _title.text;
       _description.text =
           result['description']?.toString() ?? _description.text;
-      _category.text = result['category']?.toString() ?? _category.text;
+      final category = result['category']?.toString();
+      _category.text = categoryLabels.containsKey(category) ? category! : 'other';
       _features.text = (result['distinctive_features'] as List? ?? const [])
           .join(', ');
       _hidden.text = (result['sensitive_details_to_hide'] as List? ?? const [])
@@ -158,7 +163,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   }
 
   Future<void> _submit() async {
-    final publish = _media.isNotEmpty;
+    final publish = !_found || _media.isNotEmpty;
     final body = <String, dynamic>{
       'kind': _found ? 'found' : 'lost',
       'title': _title.text.trim(),
@@ -170,8 +175,8 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       'event_at': _eventAt.toUtc().toIso8601String(),
       'location': {
         'region': _region.text.trim(),
-        'latitude': null,
-        'longitude': null,
+        'latitude': _point?.latitude,
+        'longitude': _point?.longitude,
         'exact_address': _address.text.trim().isEmpty
             ? null
             : _address.text.trim(),
@@ -219,7 +224,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       ],
       bottom: ApiButton(
         label: _step == 3
-            ? (_media.isEmpty ? 'Сохранить черновик' : 'Опубликовать')
+            ? (_found && _media.isEmpty ? 'Сохранить черновик' : 'Отправить на модерацию')
             : 'Продолжить',
         backgroundColor: _accent,
         onPressed: _next,
@@ -343,10 +348,10 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
         decoration: const InputDecoration(hintText: 'Чёрный городской рюкзак'),
       ),
       const SectionTitle('Категория'),
-      TextField(
-        controller: _category,
-        decoration: const InputDecoration(hintText: 'Сумки'),
-      ),
+      DropdownButtonFormField<String>(initialValue: _category.text,
+        decoration: const InputDecoration(labelText: 'Категория'),
+        items: categoryLabels.entries.map((e) => DropdownMenuItem(value:e.key,child:Text(e.value))).toList(),
+        onChanged:(v)=>setState(()=>_category.text=v??'other')),
       const SectionTitle('Описание'),
       TextField(
         controller: _description,
@@ -386,6 +391,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
         ),
       ),
       const SizedBox(height: 12),
+      ListingMap(listings: const [], selected: _point, onPick: (p) => setState(() => _point = p)),
       TextField(
         controller: _address,
         decoration: const InputDecoration(
@@ -476,7 +482,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
         const Padding(
           padding: EdgeInsets.only(top: 14),
           child: NoticeCard(
-            'Без фотографии backend сохранит запись как черновик. Опубликовать её можно после добавления медиа.',
+            'Пропажу можно опубликовать без фото. Для находки добавьте фотографию или сохраните черновик.',
             color: BureauColors.amber,
             background: BureauColors.amberSoft,
           ),
@@ -531,7 +537,7 @@ class PublicationSuccessPage extends StatelessWidget {
         const SizedBox(height: 12),
         NoticeCard(
           published
-              ? 'Backend запустил поиск совпадений. Новые варианты появятся в центре совпадений.'
+              ? 'Карточка отправлена на модерацию. После проверки она появится в каталоге и поиске совпадений.'
               : 'Добавьте фотографию, затем переведите запись в активный статус.',
           color: published ? BureauColors.green : BureauColors.amber,
           background: published

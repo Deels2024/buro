@@ -40,6 +40,8 @@ jobs:
           -o ServerAliveCountMax=4
           root@5.183.191.139
       - name: Verify public endpoints
+        env:
+          EXPECTED_RELEASE: ${{ github.event.workflow_run.head_sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -49,7 +51,8 @@ jobs:
             api_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/v1/health/ready || true)"
             robots_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/robots.txt || true)"
             sitemap_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/sitemap.xml || true)"
-            if [[ "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* && "$robots_body" == *'Sitemap: https://edinburo.ru/sitemap.xml'* && "$sitemap_body" == *'<loc>https://edinburo.ru/</loc>'* ]]; then
+            version_ok="$(jq -r --arg sha "$EXPECTED_RELEASE" '(.release_sha == $sha) and (.worker == "ok") and (.sms == "configured") and (.storage_transport == "https")' <<<"${api_body:-{}}" 2>/dev/null || true)"
+            if [[ "$version_ok" == "true" && "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* && "$robots_body" == *'Sitemap: https://edinburo.ru/sitemap.xml'* && "$sitemap_body" == *'<loc>https://edinburo.ru/</loc>'* ]]; then
               printf 'Public deployment is healthy (web=%s admin=%s SEO=ready).\n' "$web_status" "$admin_status"
               exit 0
             fi

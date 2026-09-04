@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="BN_", extra="ignore")
 
     environment: str = "development"
+    release_sha: str = "local"
+    seed_demo_data: bool = False
     api_host: str = "127.0.0.1"
     api_port: int = 8080
     app_secret: str = Field(min_length=32, default="development-secret-change-me-00000000")

@@ -28,4 +28,8 @@ async def ready(db: DB) -> dict[str, str]:
         "openai": "configured" if ai_service.openai_configured else "fallback",
         "openai_model": settings.openai_model,
         "version": "0.2.0",
+        "release_sha": settings.release_sha,
+        "sms": "configured" if settings.smsc_is_configured else "development",
+        "storage_transport": "https" if settings.s3_public_endpoint.startswith("https://") else "http",
+        "worker": "ok" if (await redis.get("bureau:worker:heartbeat") or "").startswith(settings.release_sha + ":") else "unavailable",
     }

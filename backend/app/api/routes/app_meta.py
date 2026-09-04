@@ -4,22 +4,15 @@ from sqlalchemy import select
 from app.api.deps import DB
 from app.core.config import settings
 from app.db.models import SystemSetting
+from app.services.categories import CATEGORIES
 
 router = APIRouter()
 
 
 DEFAULT_CATEGORIES = [
-    {"code": "documents", "title": "Документы", "sensitive": True},
-    {"code": "phones", "title": "Телефоны и электроника", "sensitive": True},
-    {"code": "keys", "title": "Ключи", "sensitive": True},
-    {"code": "bags", "title": "Сумки и рюкзаки", "sensitive": False},
-    {"code": "clothes", "title": "Одежда", "sensitive": False},
-    {"code": "jewelry", "title": "Украшения", "sensitive": True},
-    {"code": "toys", "title": "Игрушки", "sensitive": False},
-    {"code": "sport", "title": "Спорт", "sensitive": False},
-    {"code": "other", "title": "Другое", "sensitive": False},
+    {"code": code, "title": title, "sensitive": code in {"documents", "keys", "electronics", "jewelry"}}
+    for code, title in CATEGORIES.items()
 ]
-
 
 @router.get("/bootstrap")
 async def bootstrap(db: DB) -> dict:

@@ -75,6 +75,22 @@ class ObjectStorage:
     def head(self, object_key: str) -> dict:
         return self.client.head_object(Bucket=settings.s3_bucket, Key=object_key)
 
+    def read_bytes(self, object_key: str) -> bytes:
+        response = self.client.get_object(Bucket=settings.s3_bucket, Key=object_key)
+        try:
+            content = response["Body"].read(settings.max_upload_bytes + 1)
+            if len(content) > settings.max_upload_bytes:
+                raise ValueError("upload_size_exceeded")
+            return content
+        finally:
+            response["Body"].close()
+
+    def write_bytes(self, key: str, content: bytes, mime_type: str) -> None:
+        self.client.put_object(Bucket=settings.s3_bucket, Key=key, Body=content, ContentType=mime_type)
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=settings.s3_bucket, Key=key)
+
     def sha256(self, object_key: str) -> str:
         digest = hashlib.sha256()
         response = self.client.get_object(Bucket=settings.s3_bucket, Key=object_key)

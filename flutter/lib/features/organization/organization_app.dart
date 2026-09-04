@@ -1,14 +1,15 @@
-import 'dart:convert';
+import 'package:file_selector/file_selector.dart';
 
 import 'package:flutter/material.dart';
 
 import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../core/production_widgets.dart';
+import '../user/management.dart';
 import '../../data/app_controller.dart';
 import '../../data/bureau_api_client.dart';
 import '../user/create_flow.dart';
-import '../user/match_flow.dart';
 
 class OrganizationAuthPage extends StatelessWidget {
   const OrganizationAuthPage({super.key});
@@ -515,64 +516,8 @@ class OrganizationRecordPage extends StatefulWidget {
 }
 
 class _OrganizationRecordPageState extends State<OrganizationRecordPage> {
-  late final TextEditingController _storage = TextEditingController(
-    text: widget.listing['storage_code']?.toString(),
-  );
-  String? _status;
   @override
-  Widget build(BuildContext context) => BureauPage(
-    title: widget.listing['title']?.toString() ?? 'Карточка вещи',
-    subtitle: widget.listing['id']?.toString() ?? '',
-    bottom: ApiButton(
-      label: 'Сохранить карточку',
-      backgroundColor: BureauColors.green,
-      onPressed: () async {
-        await AppScope.of(
-          context,
-          listen: false,
-        ).api.updateListing(widget.listing['id'].toString(), {
-          'storage_code': _storage.text.trim().isEmpty
-              ? null
-              : _storage.text.trim(),
-          if (_status != null) 'status': _status,
-        });
-        if (!context.mounted) return;
-        Navigator.pop(context);
-      },
-    ),
-    child: Column(
-      children: [
-        const ItemArtwork(
-          height: 220,
-          color: BureauColors.green,
-          background: BureauColors.greenSoft,
-        ),
-        const SizedBox(height: 14),
-        TextField(
-          controller: _storage,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.inventory_2_outlined),
-            labelText: 'Ячейка хранения',
-          ),
-        ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: widget.listing['status']?.toString(),
-          items: const ['draft', 'active', 'paused', 'closed']
-              .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-              .toList(),
-          onChanged: (value) => _status = value,
-          decoration: const InputDecoration(labelText: 'Статус'),
-        ),
-        const SizedBox(height: 14),
-        SettingRow(
-          icon: Icons.location_on_outlined,
-          title: widget.listing['public_region']?.toString() ?? '',
-          subtitle: widget.listing['category']?.toString() ?? '',
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) => EditListingPage(listingId: widget.listing['id'].toString());
 }
 
 class OrgClaimsPage extends StatefulWidget {
@@ -648,102 +593,8 @@ class OrganizationClaimPage extends StatefulWidget {
 }
 
 class _OrganizationClaimPageState extends State<OrganizationClaimPage> {
-  late JsonMap _claim = widget.claim;
-  final _reason = TextEditingController(
-    text: 'Скрытые признаки и доказательства проверены',
-  );
   @override
-  Widget build(BuildContext context) => BureauPage(
-    title: 'Проверка владельца',
-    subtitle: 'Статус: ${_claim['status']}',
-    child: Column(
-      children: [
-        SoftCard(
-          color: BureauColors.amberSoft,
-          borderColor: BureauColors.amberSoft,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '${((((_claim['risk_score'] as num?) ?? 0) * 100)).round()}%',
-                style: const TextStyle(
-                  color: BureauColors.amber,
-                  fontSize: 30,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              Expanded(
-                child: Text(
-                  (_claim['risk_factors'] as List? ?? const []).join(', '),
-                  textAlign: TextAlign.right,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        TextField(
-          controller: _reason,
-          maxLines: 3,
-          decoration: const InputDecoration(labelText: 'Комментарий решения'),
-        ),
-        const SizedBox(height: 14),
-        if (['under_review', 'needs_more_info'].contains(_claim['status']))
-          Row(
-            children: [
-              Expanded(
-                child: ApiButton(
-                  label: 'Нужно уточнение',
-                  outlined: true,
-                  onPressed: () async {
-                    _claim = await AppScope.of(context, listen: false).api
-                        .decideClaim(
-                          _claim['id'].toString(),
-                          'needs_more_info',
-                          _reason.text,
-                        );
-                    setState(() {});
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ApiButton(
-                  label: 'Одобрить',
-                  backgroundColor: BureauColors.green,
-                  onPressed: () async {
-                    _claim = await AppScope.of(context, listen: false).api
-                        .decideClaim(
-                          _claim['id'].toString(),
-                          'approved',
-                          _reason.text,
-                        );
-                    setState(() {});
-                  },
-                ),
-              ),
-            ],
-          ),
-        const SizedBox(height: 14),
-        OutlinedButton.icon(
-          onPressed: () => pushPage(
-            context,
-            Scaffold(
-              appBar: AppBar(title: const Text('Защищённый чат')),
-              body: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: ClaimChat(claimId: _claim['id'].toString()),
-                ),
-              ),
-            ),
-          ),
-          icon: const Icon(Icons.chat_bubble_outline_rounded),
-          label: const Text('Открыть чат'),
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) => ClaimReviewPage(claimId: widget.claim['id'].toString());
 }
 
 class OrgTeamPage extends StatefulWidget {
@@ -986,6 +837,10 @@ class _OrganizationQrScanPageState extends State<OrganizationQrScanPage> {
           ),
         ),
         const SizedBox(height: 14),
+        TextButton.icon(onPressed: () async {
+          final code = await Navigator.push<String>(context,MaterialPageRoute(builder: (_) => const ScanHandoverPage()));
+          if (mounted && code != null) setState(() => _token.text=code);
+        }, icon: const Icon(Icons.camera_alt_outlined),label: const Text('Открыть камеру')),
         TextField(
           controller: _token,
           maxLines: 3,
@@ -1016,10 +871,9 @@ class OrganizationBulkImportPage extends StatefulWidget {
 
 class _OrganizationBulkImportPageState
     extends State<OrganizationBulkImportPage> {
-  final _json = TextEditingController(
-    text:
-        '[\n  {"title":"Зонт","description":"Чёрный складной зонт","category":"Аксессуары","tags":["чёрный"],"event_at":"${DateTime.now().toUtc().toIso8601String()}","region":"Санкт-Петербург","storage_code":"A-01","branch_id":null}\n]',
-  );
+  final _json = TextEditingController(text: 'title;description;category;region;event_at;storage_code\nЗонт;Чёрный складной зонт;other;Санкт-Петербург;${DateTime.now().toUtc().toIso8601String()};A-01\n');
+  @override
+  void dispose() { _json.dispose(); super.dispose(); }
   JsonMap? _result;
   @override
   Widget build(BuildContext context) => BureauPage(
@@ -1029,30 +883,34 @@ class _OrganizationBulkImportPageState
       label: 'Импортировать',
       backgroundColor: BureauColors.green,
       onPressed: () async {
-        final decoded = jsonDecode(_json.text) as List;
-        _result = await AppScope.of(context, listen: false).api.bulkImport(
-          widget.organization['id'].toString(),
-          decoded
-              .map((item) => Map<String, dynamic>.from(item as Map))
-              .toList(),
-        );
+        _result = Map<String,dynamic>.from(await AppScope.of(context,listen:false).api.request('POST','/organizations/${widget.organization['id']}/bulk-import-csv',body:{'csv':_json.text}) as Map);
         setState(() {});
       },
     ),
     child: Column(
       children: [
+        const NoticeCard('CSV в UTF-8: title, description, category, region, event_at. Дополнительно storage_code, branch_id. Записи создаются как черновики.'),
+        TextButton.icon(icon: const Icon(Icons.upload_file),label: const Text('Выбрать CSV-файл'),onPressed: () async {
+          try {
+            final file = await openFile(acceptedTypeGroups: [const XTypeGroup(label:'CSV',extensions:['csv'],uniformTypeIdentifiers:['public.comma-separated-values-text'],mimeTypes:['text/csv'])]);
+            if(file==null)return;
+            if(await file.length()>1024*1024)throw BureauApiException(413,'Файл больше 1 МБ');
+            final content=await file.readAsString();
+            if(mounted)setState(()=>_json.text=content);
+          } catch(e) { if(context.mounted)showApiError(context,e); }
+        }),
         TextField(
           controller: _json,
           maxLines: 16,
           decoration: const InputDecoration(
-            labelText: 'JSON-массив записей',
+            labelText: 'Содержимое CSV',
             alignLabelWithHint: true,
           ),
         ),
         if (_result != null) ...[
           const SizedBox(height: 14),
           NoticeCard(
-            'Обработано ${_result!['processed']} из ${_result!['total']}. Статус: ${_result!['status']}',
+            'Создано черновиков: ${_result!['processed']} из ${_result!['total']}. Ошибки: ${_result!['errors']}',
             color: BureauColors.green,
             background: BureauColors.greenSoft,
           ),

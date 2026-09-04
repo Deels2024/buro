@@ -10,6 +10,17 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bureau
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: bureau_ci
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U bureau -d bureau_ci" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://bureau:ci-only-password@localhost:5432/bureau_ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,6 +31,12 @@ jobs:
         run: |
           python -m pip install --upgrade "pip>=26.1.2"
           pip install -e './backend[dev]' pip-audit bandit
+      - name: Generate contract artifact
+        run: cd backend && python scripts/export_openapi.py --output /tmp/generated-openapi.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-openapi
+          path: /tmp/generated-openapi.json
       - name: Check backend
         run: |
           cd backend
@@ -60,9 +77,13 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flutter-lock
+          path: flutter/pubspec.lock
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build web --release --dart-define=BUREAU_API_URL=https://edinburo.ru/v1
+      - run: flutter build web --release --base-href=/app/ --dart-define=BUREAU_API_URL=https://edinburo.ru/v1
       - run: node tool/validate_project.js
 
   stack:
@@ -74,6 +95,21 @@ jobs:
         run: ./install.sh
       - name: Verify running services
         run: ./scripts/check.sh
+      - name: Verify encrypted backup and isolated database restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          age-keygen -o "$work/identity" 2>/dev/null
+          export BACKUP_IDENTITY="$work/identity"
+          export BACKUP_RECIPIENT="$(age-keygen -y "$BACKUP_IDENTITY")"
+          export BACKUP_DIR="$work/archives"
+          ./scripts/backup.sh
+          ./scripts/restore-check.sh "$BACKUP_DIR"/*.tar.age
+          ./scripts/check-release.sh "$(git rev-parse HEAD)"
       - name: Show service status on failure
         if: failure()
         run: docker compose ps --all

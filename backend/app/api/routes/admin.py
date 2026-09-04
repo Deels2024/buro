@@ -3,11 +3,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, AdminUser
 from app.db.models import AdCampaign, AdEvent, Claim, Listing, ModerationCase, Organization
 from app.schemas import AdCampaignCreate, AdCampaignOut, ModerationDecision
 from app.services.audit import add_audit
+from app.services.cache import enqueue
+from app.services.serializers import listing_out
 
 router = APIRouter()
 
@@ -36,20 +39,12 @@ async def listing_queue(
 ) -> list[dict]:
     listings = await db.scalars(
         select(Listing)
-        .where(Listing.moderation_status == "pending")
+        .where(Listing.moderation_status == "pending", Listing.status == "active")
+        .options(selectinload(Listing.media))
         .order_by(Listing.created_at)
         .limit(limit)
     )
-    return [
-        {
-            "id": str(item.id),
-            "title": item.title,
-            "kind": item.kind,
-            "category": item.category,
-            "created_at": item.created_at,
-        }
-        for item in listings
-    ]
+    return [listing_out(item, private=True).model_dump(mode="json") for item in listings]
 
 
 @router.post("/moderation/listings/{listing_id}")
@@ -59,9 +54,11 @@ async def moderate_listing(
     db: DB,
     admin: AdminUser,
 ) -> dict[str, str]:
-    listing = await db.get(Listing, listing_id)
+    listing = await db.scalar(select(Listing).where(Listing.id == listing_id).options(selectinload(Listing.media)).with_for_update())
     if not listing:
         raise HTTPException(status_code=404, detail="Публикация не найдена")
+    if payload.decision == "approve" and (listing.status != "active" or any(m.status != "ready" for m in listing.media) or (listing.kind == "found" and not listing.media)):
+        raise HTTPException(status_code=409, detail="Перед одобрением нужны опубликованная карточка и проверенные фотографии")
     status_map = {
         "approve": "approved",
         "reject": "rejected",
@@ -90,6 +87,8 @@ async def moderate_listing(
         payload={"decision": payload.decision},
     )
     await db.commit()
+    if payload.decision == "approve":
+        await enqueue("match_listing", {"listing_id": str(listing.id)})
     return {"status": listing.moderation_status}
 
 

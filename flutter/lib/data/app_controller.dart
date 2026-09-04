@@ -25,6 +25,7 @@ class AppController extends ChangeNotifier {
   String? pendingPhone;
   String? mfaTicket;
   String? lastError;
+  bool initialActionHandled = false;
 
   bool get isSignedIn => state == AppSessionState.signedIn;
   bool get isAdmin => {'admin', 'moderator'}.contains(currentUser?['role']);

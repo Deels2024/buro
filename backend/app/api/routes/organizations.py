@@ -23,6 +23,7 @@ from app.schemas import (
     BranchCreate,
     BulkImportRequest,
     ClaimOut,
+    CSVImportRequest,
     InviteMember,
     ListingOut,
     OrganizationApiKeyCreate,
@@ -35,6 +36,8 @@ from app.schemas import (
     WebhookOut,
 )
 from app.services.cache import enqueue
+from app.services.categories import normalize_category
+from app.services.csv_import import parse_inventory_csv
 from app.services.serializers import listing_out
 from app.services.webhooks import validate_webhook_url
 
@@ -314,7 +317,7 @@ async def bulk_import(
                 status="draft",
                 title=item.title,
                 description=item.description,
-                category=item.category,
+                category=normalize_category(item.category),
                 tags=item.tags,
                 public_features=[],
                 event_at=item.event_at,
@@ -567,3 +570,9 @@ async def webhook_deliveries(
         }
         for delivery, name in result.all()
     ]
+
+
+@router.post("/{organization_id}/bulk-import-csv", status_code=201)
+async def import_csv(payload: CSVImportRequest, organization_id: UUID, db: DB, user: CurrentUser) -> dict:
+    await _membership(db, organization_id, user.id)
+    return await bulk_import(BulkImportRequest(items=parse_inventory_csv(payload.csv)), organization_id, db, user)

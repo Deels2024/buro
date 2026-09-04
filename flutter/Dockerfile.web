@@ -7,7 +7,7 @@ RUN flutter pub get
 COPY . .
 ARG BUREAU_PUBLIC_API_URL=https://edinburo.ru/v1
 RUN flutter build web \
-    --release \
+    --release --base-href=/app/ \
     --dart-define=BUREAU_API_URL="${BUREAU_PUBLIC_API_URL}" && \
     mkdir -p build/web/icons && \
     cp web/robots.txt web/sitemap.xml web/site.webmanifest web/favicon.svg web/og-image.png build/web/ && \
