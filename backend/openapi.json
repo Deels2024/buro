@@ -7478,6 +7478,18 @@
           "token": {
             "type": "string",
             "title": "Token"
+          },
+          "claim_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Id"
           }
         },
         "type": "object",

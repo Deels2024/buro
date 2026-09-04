@@ -331,6 +331,7 @@ class HandoverOut(APIModel):
 
 class HandoverScan(APIModel):
     token: str
+    claim_id: UUID | None = None
 
 
 class OrganizationCreate(APIModel):

@@ -1,5 +1,9 @@
 #!/usr/bin/env sh
 set -eu
+umask 077
+mkdir -p .releases
+exec 9>.releases/operation.lock
+flock -n 9 || { echo "Deployment or backup is already running." >&2; exit 1; }
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Не найден Docker. Установите Docker Engine и повторите запуск."

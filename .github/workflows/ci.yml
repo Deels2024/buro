@@ -95,6 +95,21 @@ jobs:
         run: ./install.sh
       - name: Verify running services
         run: ./scripts/check.sh
+      - name: Verify encrypted backup and isolated database restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y age
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          age-keygen -o "$work/identity" 2>/dev/null
+          export BACKUP_IDENTITY="$work/identity"
+          export BACKUP_RECIPIENT="$(age-keygen -y "$BACKUP_IDENTITY")"
+          export BACKUP_DIR="$work/archives"
+          ./scripts/backup.sh
+          ./scripts/restore-check.sh "$BACKUP_DIR"/*.tar.age
+          ./scripts/check-release.sh "$(git rev-parse HEAD)"
       - name: Show service status on failure
         if: failure()
         run: docker compose ps --all

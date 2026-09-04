@@ -11,7 +11,8 @@ cleanup() {
   if [ "$created" = true ]; then docker compose exec -T postgres dropdb -U bureau "$test_db" >/dev/null || true; fi
   rm -rf "$staging"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
 age --decrypt -i "$BACKUP_IDENTITY" -o "$staging/payload.tar" "$archive"
 # Extract only known members, rather than arbitrary archive paths.
 tar -C "$staging" -xf "$staging/payload.tar" database.dump media.tar secrets.tar

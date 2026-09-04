@@ -543,11 +543,11 @@ class BureauApiClient {
       idempotencyKey: newIdempotencyKey(),
     ),
   );
-  Future<JsonMap> scanHandover(String token) async => _map(
+  Future<JsonMap> scanHandover(String token, {String? claimId}) async => _map(
     await request(
       'POST',
       '/claims/handover/scan',
-      body: {'token': token},
+      body: {'token': token, if (claimId != null) 'claim_id': claimId},
       idempotencyKey: newIdempotencyKey(),
     ),
   );

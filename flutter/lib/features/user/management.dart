@@ -91,10 +91,16 @@ class _ClaimReviewPageState extends State<ClaimReviewPage> {
   final _reason=TextEditingController(), _token=TextEditingController();
   Future<JsonMap>? _future;
   JsonMap? _handover;
+  JsonMap? _contact;
   BureauApiClient get api=>AppScope.of(context,listen:false).api;
   @override
-  void didChangeDependencies(){super.didChangeDependencies();_future??=api.reviewClaim(widget.claimId);}
-  void _refresh()=>setState(()=>_future=api.reviewClaim(widget.claimId));
+  void didChangeDependencies(){super.didChangeDependencies();_future??=_load();}
+  Future<JsonMap> _load() async {
+    final data = await api.reviewClaim(widget.claimId);
+    _contact = data['claim']['status'] == 'approved' ? await api.contacts(widget.claimId) : null;
+    return data;
+  }
+  void _refresh()=>setState(()=>_future=_load());
   Future<void> _decide(String decision) async {await api.decideClaim(widget.claimId,decision,_reason.text.trim());if(mounted){showApiSuccess(context,'Решение сохранено');_refresh();}}
   @override
   void dispose(){_reason.dispose();_token.dispose();super.dispose();}
@@ -125,10 +131,11 @@ class _ClaimReviewPageState extends State<ClaimReviewPage> {
       TextButton.icon(onPressed:()=>pushPage(context,Scaffold(appBar:AppBar(title:const Text('Чат по заявлению')),body:Padding(padding:const EdgeInsets.all(16),child:ClaimChat(claimId:widget.claimId)))),icon:const Icon(Icons.chat_outlined),label:const Text('Открыть чат')),
       if(claim['status']=='approved') ...[
         const SectionTitle('Передача вещи'),
-        ApiButton(label:'Разрешить обмен телефонами',outlined:true,onPressed:()async{final c=await api.setContactConsent(widget.claimId,true);if(context.mounted)showApiSuccess(context,c['unlocked']==true?'Контакты открыты в чате':'Ваше согласие сохранено. Ожидаем владельца.');}),
+        if (_contact?['unlocked'] == true) SelectableText('Телефон владельца: ${_contact?['claimant_phone'] ?? ''}'),
+        ApiButton(label:'Разрешить обмен телефонами',outlined:true,onPressed:()async{final c=await api.setContactConsent(widget.claimId,true);if(context.mounted){setState(()=>_contact=c);showApiSuccess(context,c['unlocked']==true?'Телефон владельца открыт':'Ваше согласие сохранено. Ожидаем владельца.');}}),
         TextButton.icon(onPressed:()async{final code=await Navigator.push<String>(context,MaterialPageRoute(builder:(_)=>const ScanHandoverPage()));if(code!=null&&mounted)setState(()=>_token.text=code);},icon:const Icon(Icons.qr_code_scanner),label:const Text('Сканировать QR владельца')),
         TextField(controller:_token,decoration:const InputDecoration(labelText:'Код передачи')),const SizedBox(height:12),
-        ApiButton(label:'Подтвердить передачу владельцу',onPressed:()async{_handover=await api.scanHandover(_token.text.trim());if(context.mounted){showApiSuccess(context,_handover!['completed_at']!=null?'Возврат завершён':'Вы подтвердили передачу. Ожидаем владельца.');_refresh();}}),
+        ApiButton(label:'Подтвердить передачу владельцу',onPressed:()async{_handover=await api.scanHandover(_token.text.trim(),claimId:widget.claimId);if(context.mounted){showApiSuccess(context,_handover!['completed_at']!=null?'Возврат завершён':'Вы подтвердили передачу. Ожидаем владельца.');_refresh();}}),
       ],
     ]);
   }));

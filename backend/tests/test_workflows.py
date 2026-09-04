@@ -1,4 +1,5 @@
 """Real HTTP/SQL workflows, with only queue and object storage boundaries isolated."""
+import asyncio
 import os
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -111,17 +112,26 @@ async def test_two_users_complete_return_and_private_data_stays_private(workflow
     handover=await client.post(f'/v1/claims/{cid}/handover',json={'method':'safe_point','place':'Стойка информации'},headers=h('claimant'))
     assert handover.status_code==200, handover.text
     token=handover.json()['qr_token']
+    wrong_claim = await client.post('/v1/claims/handover/scan', json={'token':token,'claim_id':str(uuid4())}, headers=h('holder'))
+    assert wrong_claim.status_code == 409
+    unchanged = (await client.get(f'/v1/claims/{cid}/handover', headers=h('claimant'))).json()
+    assert unchanged['holder_confirmed_at'] is None
     first=(await client.post('/v1/claims/handover/scan',json={'token':token},headers=h('holder'))).json()
     assert first['holder_confirmed_at'] and not first['completed_at']
     renewed=(await client.post(f'/v1/claims/{cid}/handover/regenerate',headers=h('claimant'))).json()
     assert renewed['holder_confirmed_at']==first['holder_confirmed_at']
     token=renewed['qr_token']
-    completed=await client.post('/v1/claims/handover/scan',json={'token':token},headers=h('claimant'))
+    completed, simultaneous = await asyncio.gather(
+        client.post('/v1/claims/handover/scan',json={'token':token,'claim_id':cid},headers=h('claimant')),
+        client.post('/v1/claims/handover/scan',json={'token':token,'claim_id':cid},headers=h('holder')),
+    )
     assert completed.status_code==200 and completed.json()['completed_at'], completed.text
+    assert simultaneous.status_code == 200, simultaneous.text
     repeated=await client.post('/v1/claims/handover/scan',json={'token':token},headers=h('holder'))
     assert repeated.json()['completed_at']==completed.json()['completed_at']
     assert (await client.get(f'/items/{listing_id}/')).status_code==404
     assert f'/items/{listing_id}/' not in (await client.get('/sitemap.xml')).text
+    assert (await traffic.traffic_totals())['counts']['handover_completed'] == 1
     async with sessions() as db:
         assert len(list(await db.scalars(select(Handover))))==1
 

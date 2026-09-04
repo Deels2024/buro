@@ -5,11 +5,18 @@ Uses only the Python standard library so it can run inside the API image.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
+import time
+from datetime import UTC, datetime
 from http.cookiejar import CookieJar
 from urllib.error import HTTPError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import HTTPCookieProcessor, Request, build_opener
+
+from PIL import Image
 
 from app.core.config import settings
 
@@ -95,6 +102,8 @@ def main() -> None:
     if "open_cases" not in dashboard or "pending_listings" not in dashboard:
         raise RuntimeError(f"Admin API returned an unexpected response: {dashboard}")
 
+    check_photo_workflow(opener)
+
     _, logged_out = request_json(
         opener,
         "/api/session/logout",
@@ -106,6 +115,58 @@ def main() -> None:
         raise RuntimeError(f"Logout failed: {logged_out}")
 
     print("Smoke test passed: gateway -> admin session -> backend dashboard -> logout")
+
+
+def signed_storage_request(url: str, *, data: bytes | None = None):
+    # The public endpoint may be localhost on the CI host. Reach the same MinIO
+    # from the API container while retaining the signed Host, path and query.
+    public = urlsplit(url)
+    internal = urlsplit(settings.s3_endpoint)
+    target = urlunsplit((internal.scheme, internal.netloc, public.path, public.query, ""))
+    headers = {"Host": public.netloc}
+    if data is not None:
+        headers["Content-Type"] = "image/jpeg"
+    return build_opener().open(Request(target, data=data, method="PUT" if data is not None else "GET", headers=headers), timeout=20)
+
+
+def check_photo_workflow(opener) -> None:
+    image = Image.new("RGB", (64, 48), color=(30, 80, 120))
+    exif = Image.Exif()
+    exif[270] = "CI private image metadata"
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    content = buffer.getvalue()
+    digest = hashlib.sha256(content).hexdigest()
+    _, signed = request_json(opener, "/api/backend/media/presign", host=ADMIN_HOST, method="POST", payload={
+        "filename":"smoke.jpg", "mime_type":"image/jpeg", "size_bytes":len(content), "purpose":"listing",
+    })
+    with signed_storage_request(signed["upload_url"], data=content) as uploaded:
+        if uploaded.status != 200:
+            raise RuntimeError("Signed photo upload failed")
+    _, media = request_json(opener, "/api/backend/media/complete", host=ADMIN_HOST, method="POST", payload={
+        "object_key":signed["object_key"], "mime_type":"image/jpeg", "size_bytes":len(content), "sha256":digest, "purpose":"listing",
+    })
+    _, listing = request_json(opener, "/api/backend/listings", host=ADMIN_HOST, method="POST", payload={
+        "kind":"found", "title":"Проверка обработки фотографии", "description":"Тестовая карточка только в изолированном CI-стеке.",
+        "category":"other", "event_at":datetime.now(UTC).isoformat(), "location":{"region":"Тестовый город"}, "media_ids":[media["id"]],
+    })
+    for _ in range(30):
+        _, current = request_json(opener, f'/api/backend/listings/{listing["id"]}/manage', host=ADMIN_HOST)
+        ready = next((item for item in current["media"] if item["status"] == "ready"), None)
+        if ready:
+            with signed_storage_request(ready["download_url"]) as downloaded:
+                cleaned = downloaded.read()
+            with Image.open(io.BytesIO(cleaned)) as decoded:
+                if decoded.getexif() or decoded.size != (64, 48):
+                    raise RuntimeError("Photo metadata was not removed correctly")
+            if hashlib.sha256(cleaned).hexdigest() == digest:
+                raise RuntimeError("Worker did not rewrite the uploaded image")
+            print("Photo workflow passed: signed upload -> completion -> worker -> metadata-free download")
+            return
+        if any(item["status"] in {"rejected", "blocked"} for item in current["media"]):
+            raise RuntimeError("Worker rejected the valid test photo")
+        time.sleep(1)
+    raise RuntimeError("Worker did not finish processing the test photo")
 
 
 if __name__ == "__main__":

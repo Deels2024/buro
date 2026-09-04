@@ -64,6 +64,12 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
 
   BureauApiClient get _api => AppScope.of(context, listen: false).api;
 
+  bool get _qrNeedsRefresh {
+    final token = _handover?['qr_token']?.toString();
+    final expiry = DateTime.tryParse(_handover?['qr_expires_at']?.toString() ?? '');
+    return token == null || token.isEmpty || expiry == null || !expiry.isAfter(DateTime.now());
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -211,19 +217,19 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
           _handoverMethod,
           _handoverPlace.text.trim(),
         );
-        if (_handover!['qr_token'] == null) {
+        if (_qrNeedsRefresh) {
           _handover = await _api.regenerateHandover(_claim!['id'].toString());
         }
         setState(() => _step = 9);
         return;
       case 9:
         final token = _handover?['qr_token']?.toString();
-        if (token == null || token.isEmpty) {
+        if (_qrNeedsRefresh) {
           _handover = await _api.regenerateHandover(_claim!['id'].toString());
           setState(() {});
           return;
         }
-        _handover = {...await _api.scanHandover(token), 'qr_token': token};
+        _handover = {...await _api.scanHandover(token!, claimId: _claim!['id'].toString()), 'qr_token': token};
         if (_handover!['completed_at'] != null) {
           _claim = await _api.claim(_claim!['id'].toString());
           setState(() => _step = 10);
@@ -313,7 +319,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     7 => 'Обе стороны должны дать согласие',
     8 => 'Выберите безопасный способ',
     9 => 'Обе стороны сканируют один код',
-    _ => 'Передача подтверждена backend',
+    _ => 'Передача подтверждена обеими сторонами',
   };
 
   String get _buttonLabel => switch (_step) {
@@ -330,7 +336,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     7 => 'Разрешить открыть контакты',
     8 => 'Создать QR передачи',
     9 =>
-      _handover?['qr_token'] == null ? 'Обновить QR' : 'Подтвердить получение',
+      _qrNeedsRefresh ? 'Обновить QR' : 'Подтвердить получение',
     _ => 'Готово',
   };
 
@@ -716,14 +722,14 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
             borderRadius: BorderRadius.circular(26),
             border: Border.all(color: BureauColors.green),
           ),
-          child: token == null
+          child: _qrNeedsRefresh
               ? const Icon(
                   Icons.qr_code_rounded,
                   size: 180,
                   color: BureauColors.muted,
                 )
               : QrImageView(
-                  data: token,
+                  data: token!,
                   size: 220,
                   eyeStyle: const QrEyeStyle(
                     color: BureauColors.green,
@@ -732,6 +738,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
                 ),
         ),
         const SizedBox(height: 14),
+        if (_qrNeedsRefresh) const NoticeCard('Обновите QR, чтобы продолжить передачу. Уже полученные подтверждения сохранятся.'),
         SettingRow(
           icon: Icons.schedule_rounded,
           title: 'Действует до ${_handover?['qr_expires_at'] ?? ''}',
@@ -766,7 +773,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
       Text('Вещь возвращена', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 12),
       const NoticeCard(
-        'Обе стороны подтвердили передачу. Публикация закрыта, а событие записано в журнал backend.',
+        'Обе стороны подтвердили передачу. Публикация закрыта; подтверждение сохранено в истории заявления.',
         color: BureauColors.green,
         background: BureauColors.greenSoft,
       ),

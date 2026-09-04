@@ -1,6 +1,10 @@
 #!/usr/bin/env sh
 # Application rollback only; schema downgrades are intentionally never automatic.
 set -eu
+umask 077
+mkdir -p .releases
+exec 9>.releases/operation.lock
+flock -n 9 || { echo "Deployment or backup is already running." >&2; exit 1; }
 release="${1:-$(cat .releases/previous 2>/dev/null || true)}"
 case "$release" in *[!a-f0-9]*|'') echo "A recorded commit SHA is required." >&2; exit 1;; esac
 [ "${#release}" -eq 40 ] || exit 1

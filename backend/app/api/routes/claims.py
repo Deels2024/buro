@@ -464,6 +464,8 @@ async def scan_handover(payload: HandoverScan, db: DB, user: CurrentUser) -> Han
         raise HTTPException(status_code=400, detail="QR-код недействителен или истёк")
     claim, listing = await _claim_and_listing(db, handover.claim_id)
     await _assert_participant(db, user, claim, listing)
+    if payload.claim_id is not None and payload.claim_id != claim.id:
+        raise HTTPException(status_code=409, detail="QR относится к другому заявлению")
     handover = await db.scalar(select(Handover).where(Handover.id == handover.id).with_for_update().execution_options(populate_existing=True))
     if handover.completed_at:
         return _handover_out(handover)
