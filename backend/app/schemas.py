@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
+from app.services.categories import normalize_category
+
 
 class APIModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -96,8 +98,8 @@ class MediaPresignOut(APIModel):
 
 class MediaCompleteRequest(APIModel):
     object_key: str
-    mime_type: str
-    size_bytes: int = Field(gt=0)
+    mime_type: Literal["image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime"]
+    size_bytes: int = Field(gt=0, le=100 * 1024 * 1024)
     sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
     purpose: Literal["listing", "evidence", "chat", "avatar"] = "listing"
     listing_id: UUID | None = None
@@ -140,6 +142,8 @@ class ListingCreate(APIModel):
     storage_code: str | None = Field(default=None, max_length=80)
     publish: bool = False
 
+    _category = field_validator("category")(normalize_category)
+
     @field_validator("tags", "public_features", "hidden_features")
     @classmethod
     def normalize_strings(cls, values: list[str]) -> list[str]:
@@ -157,6 +161,12 @@ class ListingUpdate(APIModel):
     location: LocationInput | None = None
     status: Literal["draft", "active", "paused", "closed"] | None = None
     storage_code: str | None = Field(default=None, max_length=80)
+    media_ids: list[UUID] | None = Field(default=None, max_length=9)
+
+    @field_validator("category")
+    @classmethod
+    def normalize_category_value(cls, value: str | None) -> str | None:
+        return normalize_category(value) if value is not None else None
 
 
 class ListingOut(APIModel):
@@ -360,6 +370,10 @@ class BulkListingItem(APIModel):
     region: str = Field(min_length=2, max_length=180)
     storage_code: str | None = Field(default=None, max_length=80)
     branch_id: UUID | None = None
+
+
+class CSVImportRequest(APIModel):
+    csv: str = Field(min_length=1, max_length=1024 * 1024)
 
 
 class BulkImportRequest(APIModel):

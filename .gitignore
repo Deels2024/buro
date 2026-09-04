@@ -6,3 +6,11 @@ admin/.next/
 backend/.venv/
 flutter/.dart_tool/
 flutter/build/
+
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+.releases/

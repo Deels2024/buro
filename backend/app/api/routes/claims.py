@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import or_, select
 
 from app.api.deps import DB, CurrentUser
 from app.core.security import decrypt_json, encrypt_json, hash_secret, random_token
@@ -34,16 +34,18 @@ from app.schemas import (
     HandoverScan,
 )
 from app.services.audit import add_audit
+from app.services.traffic import record_event
+from app.services.serializers import listing_out, media_out
 from app.services.webhooks import create_deliveries, enqueue_deliveries
 
 router = APIRouter()
 
 
 async def _claim_and_listing(db: DB, claim_id: UUID) -> tuple[Claim, Listing]:
-    claim = await db.get(Claim, claim_id)
+    claim = await db.scalar(select(Claim).where(Claim.id == claim_id).with_for_update())
     if not claim:
         raise HTTPException(status_code=404, detail="Заявление не найдено")
-    listing = await db.get(Listing, claim.listing_id)
+    listing = await db.scalar(select(Listing).where(Listing.id == claim.listing_id).with_for_update())
     if not listing:
         raise HTTPException(status_code=404, detail="Публикация не найдена")
     return claim, listing
@@ -57,6 +59,7 @@ async def _is_org_member(db: DB, user_id: UUID, organization_id: UUID | None) ->
             OrganizationMember.organization_id == organization_id,
             OrganizationMember.user_id == user_id,
             OrganizationMember.status == "active",
+            OrganizationMember.role.in_(["owner", "manager", "operator"]),
         )
     )
     return member is not None
@@ -81,9 +84,9 @@ async def _assert_holder(db: DB, user: User, listing: Listing) -> None:
 @router.post("", response_model=ClaimOut, status_code=201)
 async def create_claim(payload: ClaimCreate, db: DB, user: CurrentUser) -> Claim:
     listing = await db.get(Listing, payload.listing_id)
-    if not listing or listing.status != "active" or listing.kind != "found":
+    if not listing or listing.status != "active" or listing.kind != "found" or listing.moderation_status not in {"approved", "auto_approved"}:
         raise HTTPException(status_code=404, detail="Активная находка не найдена")
-    if listing.owner_id == user.id:
+    if listing.owner_id == user.id or await _is_org_member(db, user.id, listing.organization_id):
         raise HTTPException(status_code=422, detail="Нельзя заявить права на свою публикацию")
     existing = await db.scalar(
         select(Claim).where(Claim.listing_id == listing.id, Claim.claimant_id == user.id)
@@ -92,7 +95,8 @@ async def create_claim(payload: ClaimCreate, db: DB, user: CurrentUser) -> Claim
         return existing
     if payload.match_id:
         match = await db.get(MatchCandidate, payload.match_id)
-        if not match or match.candidate_listing_id != listing.id:
+        source = await db.get(Listing, match.source_listing_id) if match else None
+        if not match or match.candidate_listing_id != listing.id or not source or source.owner_id != user.id:
             raise HTTPException(status_code=422, detail="Совпадение не относится к находке")
     claim = Claim(listing_id=listing.id, claimant_id=user.id, match_id=payload.match_id)
     db.add(claim)
@@ -109,6 +113,49 @@ async def my_claims(db: DB, user: CurrentUser) -> list[Claim]:
         select(Claim).where(Claim.claimant_id == user.id).order_by(Claim.created_at.desc())
     )
     return list(result)
+
+
+@router.get("/incoming")
+async def incoming_claims(db: DB, user: CurrentUser, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)) -> list[dict]:
+    organizations = select(OrganizationMember.organization_id).where(
+        OrganizationMember.user_id == user.id, OrganizationMember.status == "active",
+        OrganizationMember.role.in_(["owner", "manager", "operator"]),
+    )
+    rows = await db.execute(select(Claim, Listing).join(Listing, Listing.id == Claim.listing_id).where(
+        or_(Listing.owner_id == user.id, Listing.organization_id.in_(organizations)),
+        Claim.status != "draft",
+    ).order_by(Claim.updated_at.desc()).limit(limit).offset(offset))
+    return [{**ClaimOut.model_validate(claim).model_dump(mode="json"), "listing_title": listing.title} for claim, listing in rows]
+
+
+@router.get("/{claim_id}/review")
+async def review_claim(claim_id: UUID, db: DB, user: CurrentUser) -> dict:
+    claim, listing = await _claim_and_listing(db, claim_id)
+    await _assert_holder(db, user, listing)
+    if claim.status == "draft":
+        raise HTTPException(status_code=404, detail="Заявление ещё не отправлено")
+    await db.refresh(listing, attribute_names=["media"])
+    rows = await db.execute(select(ClaimEvidence, MediaObject).join(MediaObject, MediaObject.id == ClaimEvidence.media_id).where(ClaimEvidence.claim_id == claim.id))
+    evidence = [{"id": str(e.id), "evidence_type": e.evidence_type,
+                 "note": decrypt_json(e.note_cipher).get("note", "") if e.note_cipher else "",
+                 "media": media_out(media).model_dump(mode="json") if media.status == "ready" else None,
+                 "status": media.status} for e, media in rows]
+    add_audit(db, actor_id=user.id, action="claim.evidence.read", entity_type="claim", entity_id=claim.id, payload={})
+    result = {"claim": ClaimOut.model_validate(claim).model_dump(mode="json"),
+              "listing": listing_out(listing, private=True).model_dump(mode="json"),
+              "answers": decrypt_json(claim.answers_cipher) if claim.answers_cipher else {},
+              "hidden_features": decrypt_json(listing.hidden_features_cipher) if listing.hidden_features_cipher else [],
+              "evidence": evidence}
+    await db.commit()
+    return result
+
+
+@router.get("/{claim_id}/listing")
+async def claim_listing(claim_id: UUID, db: DB, user: CurrentUser) -> dict:
+    claim, listing = await _claim_and_listing(db, claim_id)
+    await _assert_participant(db, user, claim, listing)
+    await db.refresh(listing, attribute_names=["media"])
+    return listing_out(listing).model_dump(mode="json")
 
 
 @router.get("/{claim_id}", response_model=ClaimOut)
@@ -145,7 +192,7 @@ async def add_evidence(payload: EvidenceCreate, claim_id: UUID, db: DB, user: Cu
     if claim.claimant_id != user.id or claim.status not in {"draft", "needs_more_info"}:
         raise HTTPException(status_code=403, detail="Доказательства нельзя изменить")
     media = await db.get(MediaObject, payload.media_id)
-    if not media or media.owner_id != user.id or media.purpose != "evidence":
+    if not media or media.owner_id != user.id or media.purpose != "evidence" or media.status not in {"ready", "processing"}:
         raise HTTPException(status_code=404, detail="Доказательство не найдено")
     db.add(
         ClaimEvidence(
@@ -208,6 +255,7 @@ async def submit_claim(claim_id: UUID, db: DB, user: CurrentUser) -> Claim:
         payload={"claim_id": str(claim.id), "listing_id": str(listing.id)},
     )
     await db.commit()
+    await record_event("claim_submitted")
     await enqueue_deliveries(delivery_ids)
     await db.refresh(claim)
     return claim
@@ -397,14 +445,13 @@ async def regenerate_handover(claim_id: UUID, db: DB, user: CurrentUser) -> Hand
     await _assert_participant(db, user, claim, listing)
     if claim.claimant_id != user.id:
         raise HTTPException(status_code=403, detail="QR обновляет подтверждённый владелец")
-    handover = await db.scalar(select(Handover).where(Handover.claim_id == claim.id))
-    if not handover or handover.completed_at:
+    handover = await db.scalar(select(Handover).where(Handover.claim_id == claim.id).with_for_update())
+    if claim.status != "approved" or not handover or handover.completed_at:
         raise HTTPException(status_code=409, detail="Передача недоступна")
     raw_token = random_token(24)
     handover.qr_token_hash = hash_secret(raw_token)
     handover.qr_expires_at = datetime.now(UTC) + timedelta(minutes=20)
-    handover.holder_confirmed_at = None
-    handover.claimant_confirmed_at = None
+    # Refreshing the short-lived token does not revoke a recorded physical handover confirmation.
     await db.commit()
     await db.refresh(handover)
     return _handover_out(handover, raw_token)
@@ -413,16 +460,23 @@ async def regenerate_handover(claim_id: UUID, db: DB, user: CurrentUser) -> Hand
 @router.post("/handover/scan", response_model=HandoverOut)
 async def scan_handover(payload: HandoverScan, db: DB, user: CurrentUser) -> HandoverOut:
     handover = await db.scalar(select(Handover).where(Handover.qr_token_hash == hash_secret(payload.token)))
-    if not handover or handover.qr_expires_at <= datetime.now(UTC):
+    if not handover:
         raise HTTPException(status_code=400, detail="QR-код недействителен или истёк")
     claim, listing = await _claim_and_listing(db, handover.claim_id)
     await _assert_participant(db, user, claim, listing)
+    handover = await db.scalar(select(Handover).where(Handover.id == handover.id).with_for_update().execution_options(populate_existing=True))
+    if handover.completed_at:
+        return _handover_out(handover)
+    if handover.qr_token_hash != hash_secret(payload.token) or handover.qr_expires_at.replace(tzinfo=UTC) <= datetime.now(UTC):
+        raise HTTPException(status_code=400, detail="QR-код недействителен или истёк")
+    if claim.status != "approved" or listing.status != "active":
+        raise HTTPException(status_code=409, detail="Передача больше недоступна")
     now = datetime.now(UTC)
     if user.id == claim.claimant_id:
-        handover.claimant_confirmed_at = now
+        handover.claimant_confirmed_at = handover.claimant_confirmed_at or now
     else:
         await _assert_holder(db, user, listing)
-        handover.holder_confirmed_at = now
+        handover.holder_confirmed_at = handover.holder_confirmed_at or now
     if handover.claimant_confirmed_at and handover.holder_confirmed_at:
         handover.completed_at = now
         claim.status = "completed"
@@ -445,6 +499,8 @@ async def scan_handover(payload: HandoverScan, db: DB, user: CurrentUser) -> Han
             payload={"handover_id": str(handover.id), "claim_id": str(claim.id)},
         )
     await db.commit()
+    if handover.completed_at:
+        await record_event("handover_completed")
     await enqueue_deliveries(delivery_ids)
     await db.refresh(handover)
     return _handover_out(handover)

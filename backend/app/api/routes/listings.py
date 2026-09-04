@@ -5,9 +5,10 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.services.matching import normalized_factors
 from app.api.deps import DB, CurrentUser
 from app.core.security import encrypt_json
-from app.db.models import Listing, MatchCandidate, MediaObject, OrganizationMember
+from app.db.models import Branch, Listing, MatchCandidate, MediaObject, OrganizationMember
 from app.schemas import (
     AIDescribeRequest,
     AIItemDescription,
@@ -21,9 +22,11 @@ from app.schemas import (
     PhotoSearchOut,
 )
 from app.services.ai import ai_service
+from app.services.categories import category_values
 from app.services.cache import enqueue, rate_limit
 from app.services.serializers import listing_out
 from app.services.storage import storage
+from app.services.traffic import record_event
 from app.services.webhooks import create_deliveries, enqueue_deliveries
 
 router = APIRouter()
@@ -54,9 +57,13 @@ async def _can_manage_organization(db: DB, user_id: UUID, organization_id: UUID)
 async def create_listing(payload: ListingCreate, db: DB, user: CurrentUser) -> ListingOut:
     if payload.organization_id and not await _can_manage_organization(db, user.id, payload.organization_id):
         raise HTTPException(status_code=403, detail="Нет доступа к организации")
-    if payload.publish and not payload.media_ids:
+    if payload.publish and payload.kind == "found" and not payload.media_ids:
         raise HTTPException(status_code=422, detail="Для публикации нужна хотя бы одна фотография")
 
+    if payload.branch_id:
+        branch = await db.get(Branch, payload.branch_id)
+        if not branch or branch.organization_id != payload.organization_id or not branch.active:
+            raise HTTPException(status_code=422, detail="Филиал не относится к организации")
     now = datetime.now(UTC)
     listing = Listing(
         owner_id=user.id,
@@ -88,6 +95,9 @@ async def create_listing(payload: ListingCreate, db: DB, user: CurrentUser) -> L
                     MediaObject.id.in_(payload.media_ids),
                     MediaObject.owner_id == user.id,
                     MediaObject.listing_id.is_(None),
+                    MediaObject.purpose == "listing",
+                    MediaObject.mime_type.like("image/%"),
+                    MediaObject.status.in_(["ready", "processing"]),
                 )
             )
         )
@@ -105,8 +115,9 @@ async def create_listing(payload: ListingCreate, db: DB, user: CurrentUser) -> L
     await enqueue_deliveries(delivery_ids)
     listing = await _get_listing(db, listing.id)
     if payload.publish:
+        await record_event("publication")
         await enqueue("match_listing", {"listing_id": str(listing.id)})
-    return listing_out(listing)
+    return listing_out(listing, private=True)
 
 
 @router.get("", response_model=ListingPage)
@@ -127,7 +138,7 @@ async def search_listings(
     if kind:
         filters.append(Listing.kind == kind)
     if category:
-        filters.append(Listing.category == category)
+        filters.append(func.lower(Listing.category).in_(category_values(category)))
     if region:
         filters.append(Listing.public_region.ilike(f"%{region}%"))
     if since:
@@ -161,7 +172,7 @@ async def my_listings(db: DB, user: CurrentUser) -> list[ListingOut]:
         .options(selectinload(Listing.media))
         .order_by(Listing.created_at.desc())
     )
-    return [listing_out(item) for item in result]
+    return [listing_out(item, private=True) for item in result]
 
 
 @router.get("/{listing_id}", response_model=ListingOut)
@@ -172,14 +183,49 @@ async def get_listing(listing_id: UUID, db: DB) -> ListingOut:
     return listing_out(listing)
 
 
+async def _assert_manage(db: DB, user: CurrentUser, listing: Listing) -> None:
+    allowed = listing.owner_id == user.id or user.role in {"admin", "moderator"}
+    if not allowed and listing.organization_id:
+        allowed = await _can_manage_organization(db, user.id, listing.organization_id)
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Нет доступа к публикации")
+
+
+@router.get("/{listing_id}/manage", response_model=ListingOut)
+async def managed_listing(listing_id: UUID, db: DB, user: CurrentUser) -> ListingOut:
+    listing = await _get_listing(db, listing_id)
+    await _assert_manage(db, user, listing)
+    return listing_out(listing, private=True)
+
+
 @router.patch("/{listing_id}", response_model=ListingOut)
 async def update_listing(payload: ListingUpdate, listing_id: UUID, db: DB, user: CurrentUser) -> ListingOut:
     listing = await _get_listing(db, listing_id)
-    if listing.owner_id != user.id and user.role not in {"admin", "moderator"}:
-        raise HTTPException(status_code=403, detail="Нет доступа")
-    data = payload.model_dump(exclude_unset=True)
+    await _assert_manage(db, user, listing)
+    if listing.status in {"closed", "blocked"} and user.role not in {"admin", "moderator"}:
+        raise HTTPException(status_code=409, detail="Закрытую или заблокированную публикацию нельзя изменить")
+    data = payload.model_dump(exclude_unset=True, exclude_none=True)
+    public_changed = bool(set(data) & {"title", "description", "category", "tags", "public_features", "event_at", "location", "media_ids"})
+    was_active = listing.status == "active"
     location = data.pop("location", None)
     hidden_features = data.pop("hidden_features", None)
+    media_ids = data.pop("media_ids", None)
+    if media_ids is not None:
+        media = list(await db.scalars(select(MediaObject).where(
+            MediaObject.id.in_(media_ids),
+            or_(MediaObject.listing_id == listing.id, (MediaObject.owner_id == user.id) & MediaObject.listing_id.is_(None)),
+            MediaObject.purpose == "listing", MediaObject.mime_type.like("image/%"),
+            MediaObject.status.in_(["ready", "processing"]),
+        )))
+        if len(media) != len(set(media_ids)):
+            raise HTTPException(status_code=422, detail="Часть фотографий недоступна")
+        for old in list(listing.media):
+            if old.id not in media_ids:
+                old.listing_id = None
+        for item in media:
+            item.listing_id = listing.id
+    else:
+        media = list(listing.media)
     if location:
         listing.public_region = location["region"]
         listing.approx_latitude = round(location["latitude"], 2) if location.get("latitude") is not None else None
@@ -189,23 +235,23 @@ async def update_listing(payload: ListingUpdate, listing_id: UUID, db: DB, user:
         listing.hidden_features_cipher = encrypt_json(hidden_features)
     for key, value in data.items():
         setattr(listing, key, value)
-    if data.get("status") == "active" and not listing.published_at:
-        if not listing.media:
-            raise HTTPException(status_code=422, detail="Для публикации нужна фотография")
-        listing.published_at = datetime.now(UTC)
-        await enqueue("match_listing", {"listing_id": str(listing.id)})
-    if data.get("status") == "closed":
+    if listing.status == "active":
+        if listing.kind == "found" and not any(item.status in {"ready", "processing"} for item in media):
+            raise HTTPException(status_code=422, detail="Для публикации находки нужна фотография")
+        listing.published_at = listing.published_at or datetime.now(UTC)
+        if public_changed or not was_active:
+            listing.moderation_status = "pending"
+    if listing.status == "closed":
         listing.closed_at = datetime.now(UTC)
     delivery_ids = await create_deliveries(
-        db,
-        organization_id=listing.organization_id,
-        event_type="listing.updated",
+        db, organization_id=listing.organization_id, event_type="listing.updated",
         payload={"listing_id": str(listing.id), "status": listing.status},
     )
     await db.commit()
     await enqueue_deliveries(delivery_ids)
-    listing = await _get_listing(db, listing.id)
-    return listing_out(listing)
+    # Refresh the collection after reassigning photo foreign keys.
+    await db.refresh(listing, attribute_names=["media"])
+    return listing_out(listing, private=True)
 
 
 @router.post("/ai/describe", response_model=AIItemDescription)
@@ -244,7 +290,7 @@ async def search_by_photo(payload: AIPhotoSearchRequest, db: DB, user: CurrentUs
     if payload.target_kind:
         filters.append(Listing.kind == payload.target_kind)
     if payload.category:
-        filters.append(Listing.category == payload.category)
+        filters.append(func.lower(Listing.category).in_(category_values(payload.category)))
     if payload.region:
         filters.append(Listing.public_region.ilike(f"%{payload.region}%"))
     rows = await db.execute(
@@ -284,12 +330,14 @@ async def matches(listing_id: UUID, db: DB, user: CurrentUser, limit: int = 20) 
     output = []
     for candidate in candidates:
         item = await _get_listing(db, candidate.candidate_listing_id)
+        if item.status != "active" or item.moderation_status not in {"approved", "auto_approved"}:
+            continue
         output.append(
             MatchOut(
                 id=candidate.id,
                 candidate=listing_out(item),
                 score=candidate.score,
-                factors=candidate.factors,
+                factors=normalized_factors(candidate.factors),
                 status=candidate.status,
                 created_at=candidate.created_at,
             )
@@ -311,6 +359,9 @@ async def update_match(
     match = await db.get(MatchCandidate, match_id)
     if not match or match.source_listing_id != listing_id:
         raise HTTPException(status_code=404, detail="Совпадение не найдено")
+    candidate = await _get_listing(db, match.candidate_listing_id)
+    if candidate.status != "active" or candidate.moderation_status not in {"approved", "auto_approved"}:
+        raise HTTPException(status_code=404, detail="Совпадение недоступно")
     match.status = payload.status
     await db.commit()
     candidate = await _get_listing(db, match.candidate_listing_id)
@@ -318,7 +369,7 @@ async def update_match(
         id=match.id,
         candidate=listing_out(candidate),
         score=match.score,
-        factors=match.factors,
+        factors=normalized_factors(match.factors),
         status=match.status,
         created_at=match.created_at,
     )

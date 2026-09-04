@@ -319,6 +319,10 @@ class BureauApiClient {
 
   Future<JsonMap> listing(String id) async =>
       _map(await request('GET', '/listings/$id', authenticated: false));
+  Future<JsonMap> managedListing(String id) async => _map(await request('GET', '/listings/$id/manage'));
+  Future<List<JsonMap>> incomingClaims() async => _maps(await request('GET', '/claims/incoming'));
+  Future<JsonMap> reviewClaim(String id) async => _map(await request('GET', '/claims/$id/review'));
+  Future<JsonMap> claimListing(String id) async => _map(await request('GET', '/claims/$id/listing'));
   Future<List<JsonMap>> myListings() async =>
       _maps(await request('GET', '/listings/mine'));
   Future<JsonMap> createListing(JsonMap body) async => _map(

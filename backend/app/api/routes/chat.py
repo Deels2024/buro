@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser
 from app.core.security import decrypt_json, encrypt_json, random_token
-from app.db.models import Claim, Conversation, Listing, Message, OrganizationMember, User
+from app.db.models import Claim, Conversation, Listing, MediaObject, Message, OrganizationMember, User
 from app.db.session import SessionLocal
 from app.schemas import ChatMessageCreate, ChatMessageOut
 from app.services.cache import redis, set_json
@@ -56,6 +56,7 @@ async def _conversation_access(db: DB, conversation_id: UUID, user: User) -> tup
                     OrganizationMember.organization_id == listing.organization_id,
                     OrganizationMember.user_id == user.id,
                     OrganizationMember.status == "active",
+                    OrganizationMember.role.in_(["owner", "manager", "operator"]),
                 )
             )
             is not None
@@ -105,6 +106,10 @@ async def send_message(
     conversation, claim = await _conversation_access(db, conversation_id, user)
     if claim.status not in {"under_review", "needs_more_info", "approved"}:
         raise HTTPException(status_code=409, detail="Чат пока недоступен")
+    if payload.attachment_ids:
+        owned = list(await db.scalars(select(MediaObject.id).where(MediaObject.id.in_(payload.attachment_ids), MediaObject.owner_id == user.id, MediaObject.purpose == "chat", MediaObject.status == "ready")))
+        if len(owned) != len(set(payload.attachment_ids)):
+            raise HTTPException(422, "Вложение недоступно")
     message = Message(
         conversation_id=conversation.id,
         sender_id=user.id,

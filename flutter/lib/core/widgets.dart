@@ -47,7 +47,7 @@ class BureauPage extends StatelessWidget {
         child: Column(
           children: [
             Expanded(
-              child: SingleChildScrollView(padding: padding, child: child),
+              child: SingleChildScrollView(padding: padding, child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: child))),
             ),
             if (bottom != null)
               Container(

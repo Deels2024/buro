@@ -1,12 +1,15 @@
 import asyncio
 import json
+import hashlib
 import logging
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
+from app.services.media_safety import clean_photo
 from app.db.models import Listing, MatchCandidate, MediaObject, Notification, WebhookDelivery
 from app.db.session import SessionLocal
 from app.services.ai import ai_service
@@ -21,7 +24,7 @@ logger = logging.getLogger(__name__)
 async def process_media(media_id: UUID) -> None:
     async with SessionLocal() as db:
         media = await db.get(MediaObject, media_id)
-        if not media:
+        if not media or media.status in {"ready", "rejected", "blocked"}:
             return
         actual_hash = await asyncio.to_thread(storage.sha256, media.object_key)
         if actual_hash != media.sha256:
@@ -30,6 +33,23 @@ async def process_media(media_id: UUID) -> None:
             await db.commit()
             return
         if media.mime_type.startswith("image/"):
+            try:
+                content = await asyncio.to_thread(storage.read_bytes, media.object_key)
+                clean, width, height = await asyncio.to_thread(clean_photo, content, media.mime_type)
+            except (ValueError, OSError, Warning):
+                media.status = "rejected"
+                media.moderation_labels = ["invalid_image"]
+                await db.commit()
+                return
+            old_key = media.object_key
+            safe_key = storage.make_key(media.owner_id, "photo", media.mime_type, media.purpose)
+            await asyncio.to_thread(storage.write_bytes, safe_key, clean, media.mime_type)
+            media.object_key = safe_key
+            media.sha256 = hashlib.sha256(clean).hexdigest()
+            media.size_bytes = len(clean)
+            media.width, media.height = width, height
+            await db.commit()
+            await asyncio.to_thread(storage.delete, old_key)
             url = storage.presign_download(media.object_key, internal=True)
             media.embedding = await ai_service.image_embedding(url)
         media.status = "ready"
@@ -43,7 +63,7 @@ async def match_listing(listing_id: UUID) -> None:
         source = await db.scalar(
             select(Listing).where(Listing.id == listing_id).options(selectinload(Listing.media))
         )
-        if not source or source.status != "active":
+        if not source or source.status != "active" or source.moderation_status not in {"approved", "auto_approved"}:
             return
         candidates = list(
             await db.scalars(
@@ -51,6 +71,7 @@ async def match_listing(listing_id: UUID) -> None:
                 .where(
                     Listing.kind != source.kind,
                     Listing.status == "active",
+                    Listing.moderation_status.in_(["approved", "auto_approved"]),
                     Listing.event_at >= source.event_at - timedelta(days=90),
                     Listing.event_at <= source.event_at + timedelta(days=90),
                 )
@@ -151,26 +172,51 @@ HANDLERS = {
 
 async def run_worker() -> None:
     logger.info("Bureau worker started")
-    while True:
-        raw = await redis.brpoplpush("bureau:jobs", "bureau:jobs:processing", timeout=30)
-        if not raw:
-            continue
-        job = json.loads(raw)
-        handler = HANDLERS.get(job.get("name"))
-        if not handler:
-            logger.error("Unknown job: %s", job.get("name"))
-            await redis.lrem("bureau:jobs:processing", 1, raw)
-            await redis.rpush("bureau:jobs:dead", raw)
-            continue
-        try:
-            await handler(job["payload"])
-            await redis.lrem("bureau:jobs:processing", 1, raw)
-        except Exception:
-            logger.exception("Job failed: %s", job.get("name"))
-            await redis.lrem("bureau:jobs:processing", 1, raw)
-            job["attempts"] = int(job.get("attempts", 0)) + 1
-            target = "bureau:jobs" if job["attempts"] < 3 else "bureau:jobs:dead"
-            await redis.rpush(target, json.dumps(job))
+    lease = redis.lock("bureau:worker:lease", timeout=120, blocking_timeout=2)
+    if not await lease.acquire():
+        raise RuntimeError("Another worker owns the processing queue")
+    worker_id = str(uuid4())
+    try:
+        # Only the lease holder can recover tasks left by the previous process.
+        while await redis.rpoplpush("bureau:jobs:processing", "bureau:jobs"):
+            pass
+
+        async def heartbeat() -> None:
+            while True:
+                await lease.extend(120, replace_ttl=True)
+                await redis.set("bureau:worker:heartbeat", f"{settings.release_sha}:{worker_id}", ex=60)
+                await asyncio.sleep(15)
+
+        async def consume() -> None:
+            while True:
+                raw = await redis.brpoplpush("bureau:jobs", "bureau:jobs:processing", timeout=15)
+                if not raw:
+                    continue
+                try:
+                    job = json.loads(raw)
+                    handler = HANDLERS.get(job.get("name"))
+                    if not handler:
+                        await redis.rpush("bureau:jobs:dead", raw)
+                    else:
+                        try:
+                            async with asyncio.timeout(300):
+                                await handler(job["payload"])
+                        except Exception:
+                            logger.exception("Job failed: %s", job.get("name"))
+                            job["attempts"] = int(job.get("attempts", 0)) + 1
+                            target = "bureau:jobs" if job["attempts"] < 3 else "bureau:jobs:dead"
+                            await redis.rpush(target, json.dumps(job))
+                    await redis.lrem("bureau:jobs:processing", 1, raw)
+                except (ValueError, TypeError):
+                    await redis.rpush("bureau:jobs:dead", raw)
+                    await redis.lrem("bureau:jobs:processing", 1, raw)
+        async with asyncio.TaskGroup() as group:
+            group.create_task(heartbeat())
+            group.create_task(consume())
+    finally:
+        if await lease.owned():
+            await lease.release()
+        await redis.aclose()
 
 
 if __name__ == "__main__":

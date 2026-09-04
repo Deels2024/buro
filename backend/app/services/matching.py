@@ -63,4 +63,9 @@ def score_candidate(
     }
     weights = {"visual": 0.45, "tags": 0.18, "date": 0.15, "location": 0.12, "category": 0.10}
     score = sum(factors[key] * weights[key] for key in weights)
-    return round(score * 100, 2), {key: round(value * 100, 2) for key, value in factors.items()}
+    return round(score * 100, 2), {key: round(value, 4) for key, value in factors.items()}
+
+
+def normalized_factors(values: dict[str, float]) -> dict[str, float]:
+    scale = 100 if any(value > 1 for value in values.values()) else 1
+    return {key: max(0, min(1, value / scale)) for key, value in values.items()}

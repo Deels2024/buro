@@ -5,8 +5,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import String, cast, func, or_, select
+from app.services.traffic import traffic_totals
 
+from app.services.matching import normalized_factors
 from app.api.deps import DB, AdminUser
 from app.core.security import decrypt_json, mask_phone
 from app.db.models import (
@@ -307,11 +309,15 @@ async def claims(
     db: DB,
     _: AdminUser,
     status: str | None = None,
+    query: str | None = Query(None, max_length=200),
     min_risk: float | None = Query(None, ge=0, le=1),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict:
     filters = []
+    if query:
+        term = f"%{query.strip()}%"
+        filters.append(or_(cast(Claim.id, String).ilike(term), Claim.listing_id.in_(select(Listing.id).where(Listing.title.ilike(term)))))
     if status:
         filters.append(Claim.status == status)
     if min_risk is not None:
@@ -367,7 +373,7 @@ async def matches(
                 "source_listing_id": str(item.source_listing_id),
                 "candidate_listing_id": str(item.candidate_listing_id),
                 "score": item.score,
-                "factors": item.factors,
+                "factors": normalized_factors(item.factors),
                 "status": item.status,
                 "created_at": item.created_at,
             }
@@ -531,3 +537,8 @@ async def overview_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/analytics/traffic")
+async def traffic(_: AdminUser, days: int = Query(30, ge=1, le=90)) -> dict:
+    return await traffic_totals(days)

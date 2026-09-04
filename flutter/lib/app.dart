@@ -37,6 +37,7 @@ class _BureauNakhodokAppState extends State<BureauNakhodokApp> {
       controller: _controller,
       child: MaterialApp(
         title: 'Бюро находок',
+        initialRoute: '/',
         debugShowCheckedModeBanner: false,
         theme: BureauTheme.light,
         builder: (context, child) {
@@ -45,7 +46,7 @@ class _BureauNakhodokAppState extends State<BureauNakhodokApp> {
             color: BureauColors.webCanvas,
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
+                constraints: const BoxConstraints(maxWidth: 1200),
                 child: DecoratedBox(
                   decoration: const BoxDecoration(
                     color: BureauColors.canvas,
@@ -67,7 +68,7 @@ class _BureauNakhodokAppState extends State<BureauNakhodokApp> {
           animation: _controller,
           builder: (context, _) => switch (_controller.state) {
             AppSessionState.initializing => const _AppSplash(),
-            AppSessionState.signedOut => const OnboardingPage(),
+            AppSessionState.signedOut => Uri.base.queryParameters['action'] != null ? const AuthPage() : const OnboardingPage(),
             AppSessionState.signedIn => const UserShell(),
           },
         ),

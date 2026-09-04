@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import DB, CurrentUser
@@ -36,8 +38,12 @@ async def complete(payload: MediaCompleteRequest, db: DB, user: CurrentUser) -> 
         listing = await db.get(Listing, payload.listing_id)
         if not listing or listing.owner_id != user.id:
             raise HTTPException(status_code=404, detail="Публикация не найдена")
+        if listing.status == "active":
+            listing.moderation_status = "pending"
+    if payload.size_bytes > settings.max_upload_bytes:
+        raise HTTPException(413, "Файл слишком большой")
     try:
-        head = storage.head(payload.object_key)
+        head = await asyncio.to_thread(storage.head, payload.object_key)
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Файл не найден в хранилище") from exc
     actual_size = int(head.get("ContentLength", 0))
