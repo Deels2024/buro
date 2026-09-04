@@ -54,6 +54,29 @@ chmod 600 .env
 export BN_RELEASE_SHA="$(git rev-parse HEAD)"
 
 if [ "${BN_ENVIRONMENT:-development}" = "production" ]; then
+  # Upgrade only known addresses from earlier installs of this same project.
+  # Existing custom HTTPS endpoints and all credentials are left intact.
+  public_setting() {
+    if grep -q "^$1=" .env; then
+      sed -i "s|^$1=.*|$1=$2|" .env
+    else
+      printf '%s=%s\n' "$1" "$2" >> .env
+    fi
+  }
+  case "${PUBLIC_BASE_URL:-}" in
+    http://localhost|http://5.183.191.139:8088|http://edinburo.ru)
+      public_setting PUBLIC_BASE_URL https://edinburo.ru ;;
+  esac
+  case "${S3_PUBLIC_URL:-}" in
+    http://localhost:9000|http://5.183.191.139:9000|http://edinburo.ru:9000)
+      public_setting S3_PUBLIC_URL https://edinburo.ru ;;
+  esac
+  case "${ADMIN_BASE_URL:-}" in
+    http://admin.localhost|http://admin.edinburo.ru)
+      public_setting ADMIN_BASE_URL https://admin.edinburo.ru ;;
+  esac
+  public_setting ADMIN_COOKIE_SECURE true
+  . ./.env
   if [ -z "${BN_SMSC_LOGIN:-}" ] || [ -z "${BN_SMSC_PASSWORD:-}" ]; then
     echo "Production SMSC credentials are missing: set BN_SMSC_LOGIN and BN_SMSC_PASSWORD in .env." >&2
     exit 1
