@@ -1,7 +1,7 @@
 from app.db.models import Listing, MediaObject
 from app.schemas import ListingOut, MediaOut
-from app.services.storage import storage
 from app.services.categories import normalize_category
+from app.services.storage import storage
 
 
 def media_out(media: MediaObject) -> MediaOut:

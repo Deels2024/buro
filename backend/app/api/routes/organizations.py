@@ -36,8 +36,8 @@ from app.schemas import (
     WebhookOut,
 )
 from app.services.cache import enqueue
-from app.services.csv_import import parse_inventory_csv
 from app.services.categories import normalize_category
+from app.services.csv_import import parse_inventory_csv
 from app.services.serializers import listing_out
 from app.services.webhooks import validate_webhook_url
 

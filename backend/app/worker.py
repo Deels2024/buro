@@ -1,6 +1,6 @@
 import asyncio
-import json
 import hashlib
+import json
 import logging
 from datetime import timedelta
 from uuid import UUID, uuid4
@@ -9,12 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.services.media_safety import clean_photo
 from app.db.models import Listing, MatchCandidate, MediaObject, Notification, WebhookDelivery
 from app.db.session import SessionLocal
 from app.services.ai import ai_service
 from app.services.cache import enqueue, redis
 from app.services.matching import distance_km, score_candidate
+from app.services.media_safety import clean_photo
 from app.services.storage import storage
 from app.services.webhooks import create_deliveries, deliver, enqueue_deliveries
 

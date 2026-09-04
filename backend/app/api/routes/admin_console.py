@@ -6,9 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import String, cast, func, or_, select
-from app.services.traffic import traffic_totals
 
-from app.services.matching import normalized_factors
 from app.api.deps import DB, AdminUser
 from app.core.security import decrypt_json, mask_phone
 from app.db.models import (
@@ -26,6 +24,8 @@ from app.db.models import (
 )
 from app.schemas import AdminUserUpdate, SystemSettingUpdate
 from app.services.audit import add_audit
+from app.services.matching import normalized_factors
+from app.services.traffic import traffic_totals
 
 router = APIRouter()
 

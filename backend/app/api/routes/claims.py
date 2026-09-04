@@ -34,8 +34,8 @@ from app.schemas import (
     HandoverScan,
 )
 from app.services.audit import add_audit
-from app.services.traffic import record_event
 from app.services.serializers import listing_out, media_out
+from app.services.traffic import record_event
 from app.services.webhooks import create_deliveries, enqueue_deliveries
 
 router = APIRouter()
@@ -83,7 +83,7 @@ async def _assert_holder(db: DB, user: User, listing: Listing) -> None:
 
 @router.post("", response_model=ClaimOut, status_code=201)
 async def create_claim(payload: ClaimCreate, db: DB, user: CurrentUser) -> Claim:
-    listing = await db.get(Listing, payload.listing_id)
+    listing = await db.scalar(select(Listing).where(Listing.id == payload.listing_id).with_for_update())
     if not listing or listing.status != "active" or listing.kind != "found" or listing.moderation_status not in {"approved", "auto_approved"}:
         raise HTTPException(status_code=404, detail="Активная находка не найдена")
     if listing.owner_id == user.id or await _is_org_member(db, user.id, listing.organization_id):

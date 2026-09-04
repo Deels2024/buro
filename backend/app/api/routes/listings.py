@@ -5,7 +5,6 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
-from app.services.matching import normalized_factors
 from app.api.deps import DB, CurrentUser
 from app.core.security import encrypt_json
 from app.db.models import Branch, Listing, MatchCandidate, MediaObject, OrganizationMember
@@ -22,8 +21,9 @@ from app.schemas import (
     PhotoSearchOut,
 )
 from app.services.ai import ai_service
-from app.services.categories import category_values
 from app.services.cache import enqueue, rate_limit
+from app.services.categories import category_values
+from app.services.matching import normalized_factors
 from app.services.serializers import listing_out
 from app.services.storage import storage
 from app.services.traffic import record_event

@@ -9,8 +9,8 @@ from app.api.deps import DB, AdminUser
 from app.db.models import AdCampaign, AdEvent, Claim, Listing, ModerationCase, Organization
 from app.schemas import AdCampaignCreate, AdCampaignOut, ModerationDecision
 from app.services.audit import add_audit
-from app.services.serializers import listing_out
 from app.services.cache import enqueue
+from app.services.serializers import listing_out
 
 router = APIRouter()
 

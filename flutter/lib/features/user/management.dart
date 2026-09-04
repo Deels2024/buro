@@ -128,7 +128,7 @@ class _ClaimReviewPageState extends State<ClaimReviewPage> {
         ApiButton(label:'Разрешить обмен телефонами',outlined:true,onPressed:()async{final c=await api.setContactConsent(widget.claimId,true);if(context.mounted)showApiSuccess(context,c['unlocked']==true?'Контакты открыты в чате':'Ваше согласие сохранено. Ожидаем владельца.');}),
         TextButton.icon(onPressed:()async{final code=await Navigator.push<String>(context,MaterialPageRoute(builder:(_)=>const ScanHandoverPage()));if(code!=null&&mounted)setState(()=>_token.text=code);},icon:const Icon(Icons.qr_code_scanner),label:const Text('Сканировать QR владельца')),
         TextField(controller:_token,decoration:const InputDecoration(labelText:'Код передачи')),const SizedBox(height:12),
-        ApiButton(label:'Подтвердить передачу владельцу',onPressed:()async{_handover=await api.scanHandover(_token.text.trim());if(mounted){showApiSuccess(context,_handover!['completed_at']!=null?'Возврат завершён':'Вы подтвердили передачу. Ожидаем владельца.');_refresh();}}),
+        ApiButton(label:'Подтвердить передачу владельцу',onPressed:()async{_handover=await api.scanHandover(_token.text.trim());if(context.mounted){showApiSuccess(context,_handover!['completed_at']!=null?'Возврат завершён':'Вы подтвердили передачу. Ожидаем владельца.');_refresh();}}),
       ],
     ]);
   }));

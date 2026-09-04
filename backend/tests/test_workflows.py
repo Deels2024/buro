@@ -145,7 +145,8 @@ async def test_viewer_cannot_inspect_or_decide_claim(workflow):
     client,sessions,users,h=workflow
     async with sessions() as db:
         org=Organization(name='Проверяемая организация',inn='1234567890')
-        db.add(org);await db.flush()
+        db.add(org)
+        await db.flush()
         for role in ('holder','viewer'):
             db.add(OrganizationMember(organization_id=org.id,user_id=users[role].id,role='owner' if role=='holder' else 'viewer'))
         await db.commit()
