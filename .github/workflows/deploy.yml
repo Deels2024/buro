@@ -31,6 +31,9 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - name: Check public DNS and TLS before changing running containers
+        # Record existing outages without preventing delivery of tested fixes.
+        # Final acceptance below remains mandatory and reports any open issue.
+        continue-on-error: true
         run: python3 scripts/check-public.py --preflight --report preflight.json
       - name: Verify runtime is published before connecting to the VPS
         env:
