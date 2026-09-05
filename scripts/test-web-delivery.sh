@@ -37,6 +37,9 @@ docker compose exec -T web sh -c \
   'test "$(cat /usr/share/nginx/html/release-sha.txt)" = "$1" && test -s /usr/share/nginx/html/main.dart.js' sh "$release"
 # A legacy forced command leaves BN_RELEASE_SHA unset and uses :local tags.
 # The API/worker must still identify the baked commit and become healthy.
+docker compose stop worker
+docker compose exec -T api python -c \
+  'import os,redis; r=redis.Redis.from_url(os.environ["BN_REDIS_URL"]); assert not r.exists("bureau:worker:lease"), "Worker did not release its lease on SIGTERM"'
 for component in api admin web; do docker tag "bureau/$component:$release" "bureau/$component:local"; done
 BN_RELEASE_SHA=local docker compose -f docker-compose.yml up -d --no-build --wait --wait-timeout 180
 ./scripts/check-release.sh "$release"
