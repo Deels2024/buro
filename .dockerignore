@@ -1,0 +1,25 @@
+# Root build contexts include only application source and commit identifiers.
+# Credentials, Git configuration/objects, databases and local build outputs stay out.
+**
+!backend
+!backend/**
+!flutter
+!flutter/nginx-web.conf
+!flutter/Dockerfile.web
+!scripts
+!scripts/read-release-sha.sh
+!scripts/fetch-web-release.sh
+!.git
+!.git/HEAD
+!.git/refs
+!.git/refs/**
+!.git/packed-refs
+backend/.venv
+backend/**/__pycache__
+backend/**/*.pyc
+backend/.pytest_cache
+backend/.ruff_cache
+backend/tests
+backend/deliverables
+**/.env
+**/.env.*

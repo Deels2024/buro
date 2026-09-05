@@ -18,10 +18,15 @@ jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    # The first Flutter image build can take longer on the production host
-    # while its multi-gigabyte SDK layers and compiler cache are warming up.
-    timeout-minutes: 45
+    # Flutter compilation happens in CI; the VPS downloads tested files.
+    timeout-minutes: 20
     steps:
+      - name: Verify runtime is published before connecting to the VPS
+        env:
+          EXPECTED_RELEASE: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: >-
+          curl --fail --silent --show-error --location --max-time 30
+          "https://github.com/Deels2024/buro/releases/download/runtime-$EXPECTED_RELEASE/web.sha256"
       - name: Configure deployment key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}

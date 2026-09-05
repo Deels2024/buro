@@ -33,8 +33,8 @@ services:
   web:
     image: bureau/web:${BN_RELEASE_SHA:-local}
     build:
-      context: ./flutter
-      dockerfile: Dockerfile.web
+      context: .
+      dockerfile: flutter/Dockerfile.web
       args:
         BUREAU_PUBLIC_API_URL: "${PUBLIC_BASE_URL:-http://localhost}/v1"
     healthcheck:
@@ -80,7 +80,9 @@ services:
 
   api:
     image: bureau/api:${BN_RELEASE_SHA:-local}
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment: &backend_environment
       BN_ENVIRONMENT: "${BN_ENVIRONMENT:-development}"
       BN_RELEASE_SHA: "${BN_RELEASE_SHA:-local}"
@@ -134,11 +136,13 @@ services:
 
   worker:
     image: bureau/api:${BN_RELEASE_SHA:-local}
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment: *backend_environment
     command: ["python", "-m", "app.worker"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import os,redis; r=redis.Redis.from_url(os.environ['BN_REDIS_URL'],decode_responses=True); assert (r.get('bureau:worker:heartbeat') or '').startswith(os.environ['BN_RELEASE_SHA']+':')"]
+      test: ["CMD", "python", "-c", "import redis; from app.core.config import settings; r=redis.Redis.from_url(settings.redis_url,decode_responses=True); assert (r.get('bureau:worker:heartbeat') or '').startswith(settings.release_sha+':')"]
       interval: 15s
       timeout: 5s
       retries: 10

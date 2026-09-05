@@ -1,0 +1,6 @@
+# Development/CI only: production's default Dockerfile downloads tested web files.
+services:
+  web:
+    build:
+      context: ./flutter
+      dockerfile: Dockerfile.web.source

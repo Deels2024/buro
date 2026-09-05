@@ -101,6 +101,9 @@ if [ "${BN_ENVIRONMENT:-development}" = "production" ]; then
   esac
 fi
 
+if [ "${BN_ENVIRONMENT:-development}" != "production" ]; then
+  export COMPOSE_FILE="docker-compose.yml:compose.source.yml"
+fi
 docker compose config --quiet
 # Build all images before replacing healthy containers. Never print success after a failed build.
 COMPOSE_PARALLEL_LIMIT=1 docker compose build

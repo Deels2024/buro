@@ -70,6 +70,20 @@ class Settings(BaseSettings):
         return parsed.scheme == "https" and bool(parsed.netloc)
 
     @model_validator(mode="after")
+    def load_image_release(self) -> "Settings":
+        # Older forced deploy commands do not export BN_RELEASE_SHA. The image
+        # contains the checkout SHA, independently of runtime environment values.
+        release_file = Path(__file__).resolve().parents[2] / "release-sha.txt"
+        if release_file.is_file():
+            image_release = release_file.read_text(encoding="ascii").strip()
+            if len(image_release) != 40 or any(c not in "0123456789abcdef" for c in image_release):
+                raise ValueError("Invalid image release metadata")
+            if self.release_sha not in ("local", image_release):
+                raise ValueError("BN_RELEASE_SHA does not match the image")
+            self.release_sha = image_release
+        return self
+
+    @model_validator(mode="after")
     def load_openai_api_key_file(self) -> "Settings":
         if not self.openai_api_key_file:
             return self
