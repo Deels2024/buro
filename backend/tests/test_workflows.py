@@ -19,8 +19,10 @@ from app.services import cache, traffic
 
 
 @pytest.fixture
-async def workflow(monkeypatch):
-    url = os.environ.get('TEST_DATABASE_URL', 'sqlite+aiosqlite:///:memory:')
+async def workflow(monkeypatch, tmp_path):
+    # Concurrent requests need independent transactions. In-memory SQLite
+    # shares one connection and a request rollback can undo another request.
+    url = os.environ.get('TEST_DATABASE_URL', f'sqlite+aiosqlite:///{tmp_path}/workflows.db')
     engine = create_async_engine(url)
     async with engine.begin() as connection:
         if url.startswith('postgresql'):

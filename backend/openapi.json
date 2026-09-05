@@ -4189,6 +4189,34 @@
         }
       }
     },
+    "/v1/admin/operations": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Operations",
+        "operationId": "operations_v1_admin_operations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Operations V1 Admin Operations Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/dashboard": {
       "get": {
         "tags": [

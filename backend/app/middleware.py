@@ -28,6 +28,10 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
 class IdempotencyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # OTP, MFA and refresh credentials are single-use. A cached successful
+        # response must never reissue tokens after those credentials are spent.
+        if request.url.path.startswith("/v1/auth/"):
+            return await call_next(request)
         key = request.headers.get("Idempotency-Key")
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"} or not key:
             return await call_next(request)

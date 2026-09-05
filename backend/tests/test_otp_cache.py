@@ -87,3 +87,23 @@ async def test_rate_limit_repairs_a_counter_without_ttl(fake_redis: FakeRedis) -
 
     assert not await cache.rate_limit("rate:test", 5, 60)
     assert 0 < await fake_redis.ttl("rate:test") <= 60
+
+
+async def test_sms_budget_is_shared_and_atomic(fake_redis, monkeypatch):
+    monkeypatch.setattr(cache.settings, "sms_hourly_limit", 3)
+    monkeypatch.setattr(cache.settings, "sms_daily_limit", 10)
+    results = await asyncio.gather(*(cache.reserve_sms_send() for _ in range(20)))
+    assert results.count(0) == 3
+    assert all(0 < value <= 3600 for value in results if value)
+    # Requests rejected by the hour cap do not consume the day cap.
+    day_key = (await fake_redis.keys("sms:budget:day:*"))[0]
+    assert int(await fake_redis.get(day_key)) == 3
+    assert 0 < await fake_redis.ttl(day_key) <= 86400
+
+
+async def test_daily_budget_stops_send_even_when_hourly_budget_remains(fake_redis, monkeypatch):
+    monkeypatch.setattr(cache.settings, "sms_hourly_limit", 20)
+    monkeypatch.setattr(cache.settings, "sms_daily_limit", 2)
+    assert await cache.reserve_sms_send() == 0
+    assert await cache.reserve_sms_send() == 0
+    assert 0 < await cache.reserve_sms_send() <= 86400

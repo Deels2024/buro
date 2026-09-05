@@ -1,4 +1,5 @@
 import { cookies, headers } from "next/headers";
+import { coalesceRefresh } from "./refresh";
 
 const ACCESS_COOKIE = "bn_admin_access";
 const REFRESH_COOKIE = "bn_admin_refresh";
@@ -71,16 +72,20 @@ async function refreshSession() {
   const store = await cookies();
   const refreshToken = store.get(REFRESH_COOKIE)?.value;
   if (!refreshToken) return null;
-  const response = await backendFetch("/auth/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken, device_name: "Web admin" }),
+  const tokens = await coalesceRefresh(refreshToken, async () => {
+    const response = await backendFetch("/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken, device_name: "Web admin" }),
+    });
+    if (response.status === 401 || response.status === 403) return null;
+    if (!response.ok) throw new Error("Сервис авторизации временно недоступен");
+    return await response.json() as TokenPair;
   });
-  if (!response.ok) {
+  if (!tokens) {
     await clearSession();
     return null;
   }
-  const tokens = (await response.json()) as TokenPair;
   await setSession(tokens);
   return tokens.access_token;
 }
@@ -111,7 +116,7 @@ export async function authenticatedFetch(path: string, init: RequestInit = {}) {
 
 export async function relay(response: Response) {
   const headers = new Headers();
-  for (const name of ["content-type", "content-disposition", "x-request-id"]) {
+  for (const name of ["content-type", "content-disposition", "x-request-id", "retry-after"]) {
     const value = response.headers.get(name);
     if (value) headers.set(name, value);
   }

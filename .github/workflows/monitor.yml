@@ -1,0 +1,32 @@
+name: Production health
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-health
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check public service without sending SMS or changing data
+        env:
+          EXPECTED_RELEASE: ${{ github.sha }}
+        run: python3 scripts/check-public.py --expected-release "$EXPECTED_RELEASE" --attempts 3 --report health.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-health
+          path: health.json
+          retention-days: 7

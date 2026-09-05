@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -91,7 +92,36 @@ async def verify_and_consume_otp(
 
 
 async def enqueue(job_name: str, payload: dict) -> None:
-    await redis.rpush("bureau:jobs", json.dumps({"name": job_name, "payload": payload}))
+    await redis.lpush("bureau:jobs", json.dumps({"name": job_name, "payload": payload}))
+
+
+_SMS_BUDGET_SCRIPT = """
+local hour = tonumber(redis.call("GET", KEYS[1]) or "0")
+local day = tonumber(redis.call("GET", KEYS[2]) or "0")
+if day >= tonumber(ARGV[2]) then return tonumber(ARGV[4]) end
+if hour >= tonumber(ARGV[1]) then return tonumber(ARGV[3]) end
+redis.call("INCR", KEYS[1])
+redis.call("EXPIRE", KEYS[1], ARGV[3])
+redis.call("INCR", KEYS[2])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return 0
+"""
+
+
+async def reserve_sms_send() -> int:
+    """Reserve one provider attempt atomically; return retry seconds if capped.
+
+    A timeout can mean the provider already sent the SMS, so failed attempts
+    also consume the budget. No phone number, OTP or provider secret is stored.
+    """
+    now = datetime.now(UTC)
+    seconds = now.hour * 3600 + now.minute * 60 + now.second
+    return int(await redis.eval(
+        _SMS_BUDGET_SCRIPT, 2,
+        f"sms:budget:hour:{now:%Y%m%d%H}", f"sms:budget:day:{now:%Y%m%d}",
+        settings.sms_hourly_limit, settings.sms_daily_limit,
+        3600 - seconds % 3600, 86400 - seconds,
+    ))
 
 
 async def rate_limit(key: str, limit: int, period_seconds: int) -> bool:

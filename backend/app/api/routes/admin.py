@@ -6,13 +6,32 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, AdminUser
+from app.core.config import settings
 from app.db.models import AdCampaign, AdEvent, Claim, Listing, ModerationCase, Organization
 from app.schemas import AdCampaignCreate, AdCampaignOut, ModerationDecision
 from app.services.audit import add_audit
-from app.services.cache import enqueue
+from app.services.cache import enqueue, redis
 from app.services.serializers import listing_out
 
 router = APIRouter()
+
+
+@router.get("/operations")
+async def operations(_: AdminUser) -> dict:
+    # Expose counts to authenticated administrators, never raw job payloads.
+    async with redis.pipeline(transaction=False) as pipe:
+        pipe.get("bureau:worker:heartbeat")
+        for queue in ("bureau:jobs", "bureau:jobs:processing", "bureau:jobs:dead"):
+            pipe.llen(queue)
+        heartbeat, waiting, processing, failed = await pipe.execute()
+    return {
+        "worker": "ok" if (heartbeat or "").startswith(settings.release_sha + ":") else "unavailable",
+        "waiting": waiting,
+        "processing": processing,
+        "failed": failed,
+        "sms_hourly_limit": settings.sms_hourly_limit,
+        "sms_daily_limit": settings.sms_daily_limit,
+    }
 
 
 @router.get("/dashboard")

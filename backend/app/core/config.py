@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     refresh_token_days: int = 30
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5
+    # Caps apply to actual SMS provider attempts, shared by every API replica.
+    sms_hourly_limit: int = Field(default=200, ge=1)
+    sms_daily_limit: int = Field(default=1000, ge=1)
 
     @property
     def is_production(self) -> bool:

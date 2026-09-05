@@ -171,6 +171,42 @@ HANDLERS = {
 }
 
 
+async def process_job(raw: str) -> None:
+    """Quarantine malformed messages and acknowledge queue transitions atomically."""
+    destination = None
+    replacement = raw
+    try:
+        job = json.loads(raw)
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            raise ValueError("Invalid job envelope")
+        if not isinstance(job.get("payload"), dict):
+            raise ValueError("Invalid job payload")
+        attempts = job.get("attempts", 0)
+        if type(attempts) is not int or not 0 <= attempts < 3:
+            raise ValueError("Invalid job attempts")
+        handler = HANDLERS.get(job["name"])
+        if handler is None:
+            raise ValueError("Unknown job handler")
+    except (ValueError, TypeError):
+        destination = "bureau:jobs:dead"
+    else:
+        try:
+            async with asyncio.timeout(300):
+                await handler(job["payload"])
+        except Exception:
+            logger.exception("Job failed: %s", job["name"])
+            job["attempts"] = attempts + 1
+            destination = "bureau:jobs" if job["attempts"] < 3 else "bureau:jobs:dead"
+            replacement = json.dumps(job)
+    # Cancellation before this transaction leaves the task in processing for
+    # recovery. Retry insertion and removal must succeed together.
+    async with redis.pipeline(transaction=True) as pipe:
+        if destination:
+            pipe.lpush(destination, replacement)
+        pipe.lrem("bureau:jobs:processing", 1, raw)
+        await pipe.execute()
+
+
 async def run_worker() -> None:
     logger.info("Bureau worker started")
     # A killed predecessor can retain its lease until TTL. Stay alive while
@@ -195,29 +231,13 @@ async def run_worker() -> None:
                 raw = await redis.brpoplpush("bureau:jobs", "bureau:jobs:processing", timeout=15)
                 if not raw:
                     continue
-                try:
-                    job = json.loads(raw)
-                    handler = HANDLERS.get(job.get("name"))
-                    if not handler:
-                        await redis.rpush("bureau:jobs:dead", raw)
-                    else:
-                        try:
-                            async with asyncio.timeout(300):
-                                await handler(job["payload"])
-                        except Exception:
-                            logger.exception("Job failed: %s", job.get("name"))
-                            job["attempts"] = int(job.get("attempts", 0)) + 1
-                            target = "bureau:jobs" if job["attempts"] < 3 else "bureau:jobs:dead"
-                            await redis.rpush(target, json.dumps(job))
-                    await redis.lrem("bureau:jobs:processing", 1, raw)
-                except (ValueError, TypeError):
-                    await redis.rpush("bureau:jobs:dead", raw)
-                    await redis.lrem("bureau:jobs:processing", 1, raw)
+                await process_job(raw)
         async with asyncio.TaskGroup() as group:
             group.create_task(heartbeat())
             group.create_task(consume())
     finally:
         if await lease.owned():
+            await redis.delete("bureau:worker:heartbeat")
             await lease.release()
         await redis.aclose()
 
