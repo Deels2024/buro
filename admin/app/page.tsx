@@ -61,6 +61,7 @@ type SettingRow = {
   key: string; value: Record<string, unknown>; description: string; public: boolean; updated_at: string;
 };
 type Health = { status: string; database: string; redis: string; version: string };
+type Operations = { worker: string; waiting: number; processing: number; failed: number; sms_hourly_limit: number; sms_daily_limit: number };
 
 const navigation: { key: NavKey; label: string; icon: string }[] = [
   { key: "overview", label: "Главная", icon: "⌂" },
@@ -268,6 +269,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   const [offset, setOffset] = useState(0);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [operations, setOperations] = useState<Operations | null>(null);
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -315,10 +317,12 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
         const data = await jsonRequest<PageResponse<TicketRow>>("/api/backend/admin/support/tickets?limit=50&offset=" + offset);
         setRecords(data.items); setTotal(data.total);
       } else if (key === "integrations") {
-        const [healthResult, organizationsResult] = await Promise.all([
+        const [healthResult, organizationsResult, operationsResult] = await Promise.all([
           jsonRequest<Health>("/api/backend/health/ready"),
           jsonRequest<PageResponse<OrganizationRow>>("/api/backend/admin/organizations?limit=100"),
+          jsonRequest<Operations>("/api/backend/admin/operations"),
         ]);
+        setOperations(operationsResult);
         setHealth(healthResult); setRecords(organizationsResult.items); setTotal(organizationsResult.total);
       } else if (key === "settings") {
         const data = await jsonRequest<SettingRow[]>("/api/backend/admin/settings");
@@ -400,7 +404,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
           {section === "users" && <Users rows={records as UserRow[]} total={total} onAction={action} />}
           {section === "moderation" && <Moderation rows={records as ModerationRow[]} onAction={action} />}
           {section === "support" && <Support rows={records as TicketRow[]} total={total} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
-          {section === "integrations" && <Integrations health={health} organizations={records as OrganizationRow[]} analytics={analytics} />}
+          {section === "integrations" && <Integrations health={health} operations={operations} organizations={records as OrganizationRow[]} analytics={analytics} />}
           {section === "analytics" && <><TrafficCounts/><Analytics analytics={analytics} /></>}
           {["items","claims","matches","organizations","users","support"].includes(section) && <nav className="modal-actions" aria-label="Страницы реестра"><button className="filter-button" disabled={offset===0||loading} onClick={()=>setOffset(Math.max(0,offset-50))}>Назад</button><span>{offset+1}–{Math.min(offset+50,total)} из {number(total)}</span><button className="filter-button" disabled={offset+50>=total||loading} onClick={()=>setOffset(offset+50)}>Далее</button></nav>}
           {section === "settings" && <Settings rows={records as SettingRow[]} onAction={action} />}
@@ -440,7 +444,7 @@ function Support({ rows, total, onOpen }: { rows: TicketRow[]; total: number; on
   return <section className="panel"><h2>Обращений: {number(total)}</h2>{rows.map(row=><article className="ticket-row" key={row.id}><span><strong>{row.subject}</strong><small>{formatDate(row.updated_at)}</small></span><Status>{statusName(row.status)}</Status><button className="primary-button" onClick={()=>onOpen(row)}>Читать и ответить</button></article>)}{!rows.length&&<Empty/>}</section>;
 }
 
-function Integrations({ health, organizations, analytics }: { health: Health | null; organizations: OrganizationRow[]; analytics: AnalyticsData | null }) {
+function Integrations({ health, operations, organizations, analytics }: { health: Health | null; operations: Operations | null; organizations: OrganizationRow[]; analytics: AnalyticsData | null }) {
   const cards = [
     ["FastAPI backend", health?.status ?? "checking", "Версия " + (health?.version ?? "—")],
     ["PostgreSQL", health?.database ?? "checking", "Основная база данных"],
@@ -448,8 +452,11 @@ function Integrations({ health, organizations, analytics }: { health: Health | n
     ["API организаций", organizations.filter((row) => row.api_enabled).length + " активно", number(organizations.reduce((sum, row) => sum + row.inventory, 0)) + " записей"],
     ["Вебхуки", organizations.reduce((sum, row) => sum + row.webhooks, 0) + " настроено", (analytics?.operations.webhook_queue ?? 0) + " в очереди"],
     ["Ошибки доставок", String(analytics?.operations.webhook_failures ?? 0), "за текущий период"],
+    ["Обработка фотографий и совпадений", operations?.worker ?? "checking", `${operations?.waiting ?? 0} ожидают · ${operations?.processing ?? 0} обрабатываются`],
+    ["Необработанные задачи", String(operations?.failed ?? 0), "Задачи после трёх неудачных попыток или с повреждёнными данными. Требуют проверки."],
+    ["Защита расходов на SMS", operations ? "активна" : "checking", `${operations?.sms_hourly_limit ?? "—"} запросов в час · ${operations?.sms_daily_limit ?? "—"} в сутки`],
   ];
-  return <section className="integration-grid">{cards.map((item, index) => <article className="panel integration-card" key={item[0]}><div className={"integration-icon int-" + (index + 1)}>{["↔", "▤", "◌", "◎", "➜", "!"][index]}</div><div><h3>{item[0]}</h3><p>{item[2]}</p></div><Status tone={String(item[1]).includes("ok") || String(item[1]).includes("ready") || String(item[1]).includes("актив") || item[1] === "0" ? "green" : "blue"}>{item[1]}</Status></article>)}</section>;
+  return <section className="integration-grid">{cards.map((item, index) => <article className="panel integration-card" key={item[0]}><div className={"integration-icon int-" + (index % 6 + 1)}>{["↔", "▤", "◌", "◎", "➜", "!"][index % 6]}</div><div><h3>{item[0]}</h3><p>{item[2]}</p></div><Status tone={item[1] === "unavailable" || (index === 7 && Number(item[1]) > 0) ? "red" : String(item[1]).includes("ok") || String(item[1]).includes("ready") || String(item[1]).includes("актив") || item[1] === "0" ? "green" : "blue"}>{item[1]}</Status></article>)}</section>;
 }
 
 function Analytics({ analytics }: { analytics: AnalyticsData | null }) {

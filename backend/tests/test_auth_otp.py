@@ -132,3 +132,29 @@ async def test_delivery_failure_releases_code_and_resend_cooldown(
     assert len(redis.deleted) == 2
     assert redis.deleted[0].startswith("otp:")
     assert redis.deleted[1].startswith("otp:phone:cooldown:")
+
+
+async def test_global_budget_rejects_before_a_paid_sms_and_releases_cooldown(monkeypatch):
+    async def no_cooldown(*args):
+        return 0
+    async def allow(*args):
+        return True
+    async def exhausted():
+        return 1800
+    async def must_not_send(*args, **kwargs):
+        raise AssertionError("No code or paid SMS may be created after reaching the cap")
+    recorder = _RedisDeleteRecorder()
+    monkeypatch.setattr(auth, "redis", recorder)
+    monkeypatch.setattr(auth.settings, "smsc_login", "test")
+    monkeypatch.setattr(auth.settings, "smsc_password", "test")
+    monkeypatch.setattr(auth, "_otp_cooldown_remaining", no_cooldown)
+    monkeypatch.setattr(auth, "_acquire_otp_cooldown", no_cooldown)
+    monkeypatch.setattr(auth, "rate_limit", allow)
+    monkeypatch.setattr(auth, "reserve_sms_send", exhausted)
+    monkeypatch.setattr(auth, "set_json", must_not_send)
+    monkeypatch.setattr(auth, "send_otp", must_not_send)
+    with pytest.raises(HTTPException) as captured:
+        await auth.request_code(PhoneCodeRequest(phone="+79991234567"), _request(peer="8.8.8.8"))
+    assert captured.value.status_code == 503
+    assert captured.value.headers == {"Retry-After": "1800"}
+    assert len(recorder.deleted) == 1 and recorder.deleted[0].startswith("otp:phone:cooldown:")

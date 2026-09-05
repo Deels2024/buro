@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && node --test tests/integration-contract.test.mjs",
+    "test": "npm run typecheck && node --experimental-strip-types --test tests/integration-contract.test.mjs tests/refresh.test.mjs",
     "lint": "eslint app tests"
   },
   "dependencies": {

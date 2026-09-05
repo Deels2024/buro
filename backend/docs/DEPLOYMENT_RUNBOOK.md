@@ -1,5 +1,7 @@
 # Production runbook
 
+Актуальная приёмка существующего сервера и ограничения: [`docs/PRODUCTION_READINESS.md`](../../docs/PRODUCTION_READINESS.md). Ниже — требования к целевому контуру, а не утверждение, что PITR, canary, регион хранения и централизованные метрики уже настроены.
+
 ## Первый запуск
 
 1. Создайте отдельные базы/пользователей PostgreSQL и Redis.
@@ -7,7 +9,7 @@
 3. Заполните секреты из `.env.example`; `BN_PUBLIC_API_URL` в production обязан быть HTTPS.
 4. Выполните `alembic upgrade head` ровно одним migration job до запуска новых реплик API.
 5. Запустите API и worker, затем проверьте `/v1/health/live` и `/v1/health/ready`.
-6. Выполните `python scripts/seed.py` один раз.
+6. `python scripts/seed.py` подготавливает системные настройки. Демо-наполнение отключено по умолчанию и запрещено в production.
 7. Войдите номером `BN_BOOTSTRAP_ADMIN_PHONE`, настройте TOTP и удалите bootstrap-номер из обычных инструкций команды.
 
 ## Обязательные внешние компоненты

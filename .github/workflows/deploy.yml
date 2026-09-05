@@ -16,11 +16,22 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     # Flutter compilation happens in CI; the VPS downloads tested files.
     timeout-minutes: 20
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - name: Check public DNS and TLS before changing running containers
+        run: python3 scripts/check-public.py --preflight --report preflight.json
       - name: Verify runtime is published before connecting to the VPS
         env:
           EXPECTED_RELEASE: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -44,27 +55,16 @@ jobs:
           -o ServerAliveInterval=15
           -o ServerAliveCountMax=4
           root@5.183.191.139
-      - name: Verify public endpoints
+      - name: Verify public endpoints and exact release
         env:
           EXPECTED_RELEASE: ${{ github.event.workflow_run.head_sha || github.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in {1..12}; do
-            web_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://edinburo.ru/ || true)"
-            admin_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://admin.edinburo.ru/ || true)"
-            api_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/v1/health/ready || true)"
-            web_release="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/app/release-sha.txt || true)"
-            robots_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/robots.txt || true)"
-            sitemap_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/sitemap.xml || true)"
-            version_ok="$(jq -r --arg sha "$EXPECTED_RELEASE" '(.release_sha == $sha) and (.worker == "ok") and (.sms == "configured") and (.storage_transport == "https")' <<<"${api_body:-{}}" 2>/dev/null || true)"
-            if [[ "$version_ok" == "true" && "$web_release" == "$EXPECTED_RELEASE" && "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* && "$robots_body" == *'Sitemap: https://edinburo.ru/sitemap.xml'* && "$sitemap_body" == *'<loc>https://edinburo.ru/</loc>'* ]]; then
-              printf 'Public deployment is healthy (web=%s admin=%s SEO=ready).\n' "$web_status" "$admin_status"
-              exit 0
-            fi
-            printf 'Attempt %s/12: web=%s admin=%s api=%s robots=%s sitemap=%s\n' "$attempt" "$web_status" "$admin_status" "${api_body:-unavailable}" "${robots_body:+available}" "${sitemap_body:+available}"
-            sleep 5
-          done
-
-          printf 'Deployment did not become healthy.\n' >&2
-          exit 1
+        run: python3 scripts/check-public.py --expected-release "$EXPECTED_RELEASE" --attempts 12 --report acceptance.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-acceptance
+          path: |
+            preflight.json
+            acceptance.json
+          if-no-files-found: ignore
+          retention-days: 14

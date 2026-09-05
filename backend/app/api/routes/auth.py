@@ -5,7 +5,7 @@ from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.api.deps import DB, CurrentUser
 from app.core.config import settings
@@ -37,6 +37,7 @@ from app.services.cache import (
     OtpVerificationResult,
     rate_limit,
     redis,
+    reserve_sms_send,
     set_json,
     verify_and_consume_otp,
 )
@@ -154,6 +155,16 @@ async def request_code(payload: PhoneCodeRequest, request: Request) -> PhoneCode
     if retry_after:
         _raise_otp_cooldown(retry_after)
 
+    if settings.smsc_is_configured:
+        retry_after = await reserve_sms_send()
+        if retry_after:
+            await redis.delete(cooldown_key)
+            raise HTTPException(
+                status_code=503,
+                detail="Отправка SMS временно ограничена. Попробуйте позже",
+                headers={"Retry-After": str(retry_after)},
+            )
+
     code = generate_otp()
     otp_key = f"otp:{phone_hash}"
     try:
@@ -214,6 +225,8 @@ async def verify_code(payload: PhoneCodeVerify, db: DB) -> TokenPair | MFARequir
         if user.status == "invited":
             user.status = "active"
             user.verified_at = datetime.now(UTC)
+        if user.status != "active":
+            raise HTTPException(status_code=403, detail="Аккаунт недоступен")
         user.last_seen_at = datetime.now(UTC)
 
     if user.role in {"admin", "moderator"} and user.admin_2fa_enabled:
@@ -238,7 +251,8 @@ async def verify_admin_2fa(payload: MFAVerifyRequest, db: DB) -> TokenPair:
         raise HTTPException(status_code=400, detail="Проверка истекла")
     ticket = json.loads(raw)
     user = await db.get(User, UUID(ticket["user_id"]))
-    if not user or user.role not in {"admin", "moderator"} or not user.admin_totp_secret_cipher:
+    if (not user or user.status != "active" or user.role not in {"admin", "moderator"}
+            or not user.admin_2fa_enabled or not user.admin_totp_secret_cipher):
         raise HTTPException(status_code=403, detail="Двухфакторная авторизация не настроена")
     secret = decrypt_json(user.admin_totp_secret_cipher)["secret"]
     if not verify_totp(secret, payload.code):
@@ -254,6 +268,8 @@ async def verify_admin_2fa(payload: MFAVerifyRequest, db: DB) -> TokenPair:
 async def setup_admin_2fa(user: CurrentUser, db: DB) -> TOTPSetupOut:
     if user.role not in {"admin", "moderator"}:
         raise HTTPException(status_code=403, detail="Настройка доступна только администраторам")
+    if user.admin_2fa_enabled:
+        raise HTTPException(status_code=409, detail="Сначала отключите 2FA текущим одноразовым кодом")
     secret = generate_totp_secret()
     user.admin_totp_secret_cipher = encrypt_json({"secret": secret})
     user.admin_2fa_enabled = False
@@ -268,6 +284,8 @@ async def setup_admin_2fa(user: CurrentUser, db: DB) -> TOTPSetupOut:
 async def enable_admin_2fa(payload: TOTPEnableRequest, user: CurrentUser, db: DB) -> MessageResponse:
     if user.role not in {"admin", "moderator"} or not user.admin_totp_secret_cipher:
         raise HTTPException(status_code=409, detail="Сначала создайте секрет 2FA")
+    if not await rate_limit(f"admin-2fa:change:{user.id}", 5, 300):
+        raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте через 5 минут")
     secret = decrypt_json(user.admin_totp_secret_cipher)["secret"]
     if not verify_totp(secret, payload.code):
         raise HTTPException(status_code=400, detail="Неверный одноразовый код")
@@ -280,6 +298,8 @@ async def enable_admin_2fa(payload: TOTPEnableRequest, user: CurrentUser, db: DB
 async def disable_admin_2fa(payload: TOTPEnableRequest, user: CurrentUser, db: DB) -> MessageResponse:
     if not user.admin_2fa_enabled or not user.admin_totp_secret_cipher:
         raise HTTPException(status_code=409, detail="Двухфакторная авторизация не включена")
+    if not await rate_limit(f"admin-2fa:change:{user.id}", 5, 300):
+        raise HTTPException(status_code=429, detail="Слишком много попыток. Попробуйте через 5 минут")
     secret = decrypt_json(user.admin_totp_secret_cipher)["secret"]
     if not verify_totp(secret, payload.code):
         raise HTTPException(status_code=400, detail="Неверный одноразовый код")
@@ -292,14 +312,26 @@ async def disable_admin_2fa(payload: TOTPEnableRequest, user: CurrentUser, db: D
 @router.post("/refresh", response_model=TokenPair)
 async def refresh(payload: RefreshRequest, db: DB) -> TokenPair:
     token_hash = hash_secret(payload.refresh_token)
-    record = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     now = datetime.now(UTC)
-    if not record or record.revoked_at or record.expires_at <= now:
+    # Only one concurrent request may consume this refresh token. The SQL
+    # predicate is rechecked under the row lock by PostgreSQL.
+    record = await db.scalar(
+        update(RefreshToken)
+        .where(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > now,
+        )
+        .values(revoked_at=now)
+        .returning(RefreshToken)
+    )
+    if not record:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительная сессия")
     user = await db.get(User, record.user_id)
     if not user or user.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Аккаунт недоступен")
-    record.revoked_at = now
+    if user.role in {"admin", "moderator"} and user.admin_2fa_enabled and not record.mfa_verified:
+        raise HTTPException(status_code=401, detail="Требуется двухфакторная авторизация")
     raw_refresh, _ = await _store_refresh(
         db, user, payload.device_name or record.device_name, mfa=record.mfa_verified
     )
