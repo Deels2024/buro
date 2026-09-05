@@ -70,6 +70,26 @@ class Settings(BaseSettings):
         return parsed.scheme == "https" and bool(parsed.netloc)
 
     @model_validator(mode="after")
+    def normalize_known_public_deployment(self) -> "Settings":
+        # Earlier installs used the VPS's HTTP port as the public API address.
+        # Apply this project's migration even when a legacy command skips install.sh.
+        if self.public_api_url.rstrip("/") not in {
+            "http://5.183.191.139:8088/v1", "http://edinburo.ru/v1", "https://edinburo.ru/v1",
+        }:
+            return self
+        self.environment = "production"
+        self.public_api_url = "https://edinburo.ru/v1"
+        if self.s3_public_endpoint.rstrip("/") in {
+            "http://localhost:9000", "http://5.183.191.139:9000", "http://edinburo.ru:9000",
+        }:
+            self.s3_public_endpoint = "https://edinburo.ru"
+        self.cors_origins = list(dict.fromkeys([
+            origin for origin in self.cors_origins
+            if urlparse(origin).hostname not in {"localhost", "127.0.0.1", "5.183.191.139", "edinburo.ru", "admin.edinburo.ru"}
+        ] + ["https://edinburo.ru", "https://admin.edinburo.ru"]))
+        return self
+
+    @model_validator(mode="after")
     def load_image_release(self) -> "Settings":
         # Older forced deploy commands do not export BN_RELEASE_SHA. The image
         # contains the checkout SHA, independently of runtime environment values.

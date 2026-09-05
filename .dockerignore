@@ -4,12 +4,15 @@
 !backend
 !backend/**
 !flutter
+flutter/**
 !flutter/nginx-web.conf
 !flutter/Dockerfile.web
 !scripts
+scripts/**
 !scripts/read-release-sha.sh
 !scripts/fetch-web-release.sh
 !.git
+.git/**
 !.git/HEAD
 !.git/refs
 !.git/refs/**

@@ -53,6 +53,17 @@ if grep -q "__MINIO_PASSWORD__" .env; then replace_placeholder "__MINIO_PASSWORD
 chmod 600 .env
 export BN_RELEASE_SHA="$(git rev-parse HEAD)"
 
+case "${PUBLIC_BASE_URL:-}" in
+  http://5.183.191.139:8088|http://edinburo.ru|https://edinburo.ru)
+    if grep -q '^BN_ENVIRONMENT=' .env; then
+      sed -i 's|^BN_ENVIRONMENT=.*|BN_ENVIRONMENT=production|' .env
+    else
+      printf '\nBN_ENVIRONMENT=production\n' >> .env
+    fi
+    BN_ENVIRONMENT=production
+    ;;
+esac
+
 if [ "${BN_ENVIRONMENT:-development}" = "production" ]; then
   # Upgrade only known addresses from earlier installs of this same project.
   # Existing custom HTTPS endpoints and all credentials are left intact.
