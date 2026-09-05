@@ -15,11 +15,12 @@ function baseUrl() {
   return (process.env.BUREAU_API_URL ?? "http://api:8080/v1").replace(/\/$/, "");
 }
 
-function cookieOptions(maxAge: number) {
+async function cookieOptions(maxAge: number) {
+  const requestHeaders = await headers();
   return {
     httpOnly: true,
     sameSite: "strict" as const,
-    secure: process.env.ADMIN_COOKIE_SECURE === "true",
+    secure: process.env.ADMIN_COOKIE_SECURE === "true" || requestHeaders.get("x-forwarded-proto") === "https",
     path: "/",
     maxAge,
   };
@@ -45,14 +46,14 @@ export async function backendFetch(path: string, init: RequestInit = {}) {
 
 export async function setSession(tokens: TokenPair) {
   const store = await cookies();
-  store.set(ACCESS_COOKIE, tokens.access_token, cookieOptions(tokens.expires_in));
-  store.set(REFRESH_COOKIE, tokens.refresh_token, cookieOptions(30 * 24 * 60 * 60));
+  store.set(ACCESS_COOKIE, tokens.access_token, await cookieOptions(tokens.expires_in));
+  store.set(REFRESH_COOKIE, tokens.refresh_token, await cookieOptions(30 * 24 * 60 * 60));
   store.delete(MFA_COOKIE);
 }
 
 export async function setMfaTicket(ticket: string, expiresIn = 300) {
   const store = await cookies();
-  store.set(MFA_COOKIE, ticket, cookieOptions(expiresIn));
+  store.set(MFA_COOKIE, ticket, await cookieOptions(expiresIn));
 }
 
 export async function getMfaTicket() {

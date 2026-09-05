@@ -1,21 +1,15 @@
-FROM ghcr.io/cirruslabs/flutter:stable AS builder
-
-WORKDIR /app
-COPY pubspec.yaml pubspec.lock ./
-RUN flutter pub get
-
-COPY . .
-ARG BUREAU_PUBLIC_API_URL=https://edinburo.ru/v1
-RUN flutter build web \
-    --release --base-href=/app/ \
-    --dart-define=BUREAU_API_URL="${BUREAU_PUBLIC_API_URL}" && \
-    mkdir -p build/web/icons && \
-    cp web/robots.txt web/sitemap.xml web/site.webmanifest web/favicon.svg web/og-image.png build/web/ && \
-    cp web/icons/icon-180.png web/icons/icon-192.png web/icons/icon-512.png build/web/icons/
+FROM alpine:3.20 AS release
+RUN apk add --no-cache curl
+COPY .git/ /git/
+COPY scripts/read-release-sha.sh scripts/fetch-web-release.sh /scripts/
+ARG BUREAU_RELEASE_BASE_URL=https://github.com/Deels2024/buro/releases/download
+RUN test ! -e /git/config && test ! -d /git/objects && \
+    release="$(sh /scripts/read-release-sha.sh /git)" && \
+    BUREAU_RELEASE_BASE_URL="$BUREAU_RELEASE_BASE_URL" sh /scripts/fetch-web-release.sh "$release" /web
 
 FROM nginx:1.27-alpine AS runner
-COPY nginx-web.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/build/web /usr/share/nginx/html
+COPY flutter/nginx-web.conf /etc/nginx/conf.d/default.conf
+COPY --from=release /web /usr/share/nginx/html
 EXPOSE 80
 HEALTHCHECK --interval=10s --timeout=5s --retries=20 \
   CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1

@@ -18,10 +18,15 @@ jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    # The first Flutter image build can take longer on the production host
-    # while its multi-gigabyte SDK layers and compiler cache are warming up.
-    timeout-minutes: 45
+    # Flutter compilation happens in CI; the VPS downloads tested files.
+    timeout-minutes: 20
     steps:
+      - name: Verify runtime is published before connecting to the VPS
+        env:
+          EXPECTED_RELEASE: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: >-
+          curl --fail --silent --show-error --location --max-time 30
+          "https://github.com/Deels2024/buro/releases/download/runtime-$EXPECTED_RELEASE/web.sha256"
       - name: Configure deployment key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -49,10 +54,11 @@ jobs:
             web_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://edinburo.ru/ || true)"
             admin_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://admin.edinburo.ru/ || true)"
             api_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/v1/health/ready || true)"
+            web_release="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/app/release-sha.txt || true)"
             robots_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/robots.txt || true)"
             sitemap_body="$(curl --silent --show-error --fail --max-time 15 https://edinburo.ru/sitemap.xml || true)"
             version_ok="$(jq -r --arg sha "$EXPECTED_RELEASE" '(.release_sha == $sha) and (.worker == "ok") and (.sms == "configured") and (.storage_transport == "https")' <<<"${api_body:-{}}" 2>/dev/null || true)"
-            if [[ "$version_ok" == "true" && "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* && "$robots_body" == *'Sitemap: https://edinburo.ru/sitemap.xml'* && "$sitemap_body" == *'<loc>https://edinburo.ru/</loc>'* ]]; then
+            if [[ "$version_ok" == "true" && "$web_release" == "$EXPECTED_RELEASE" && "$web_status" == "200" && "$admin_status" == "200" && "$api_body" == *'"status":"ready"'* && "$robots_body" == *'Sitemap: https://edinburo.ru/sitemap.xml'* && "$sitemap_body" == *'<loc>https://edinburo.ru/</loc>'* ]]; then
               printf 'Public deployment is healthy (web=%s admin=%s SEO=ready).\n' "$web_status" "$admin_status"
               exit 0
             fi

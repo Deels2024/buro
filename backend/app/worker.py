@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import signal
 from datetime import timedelta
 from uuid import UUID, uuid4
 
@@ -172,7 +173,9 @@ HANDLERS = {
 
 async def run_worker() -> None:
     logger.info("Bureau worker started")
-    lease = redis.lock("bureau:worker:lease", timeout=120, blocking_timeout=2)
+    # A killed predecessor can retain its lease until TTL. Stay alive while
+    # waiting; repeated crash/restart cycles cause Compose to fail activation.
+    lease = redis.lock("bureau:worker:lease", timeout=120, blocking_timeout=130)
     if not await lease.acquire():
         raise RuntimeError("Another worker owns the processing queue")
     worker_id = str(uuid4())
@@ -219,6 +222,19 @@ async def run_worker() -> None:
         await redis.aclose()
 
 
+async def main() -> None:
+    task = asyncio.create_task(run_worker())
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, task.cancel)
+    try:
+        await task
+    except asyncio.CancelledError:
+        # Cancellation unwinds the task group and releases the queue lease.
+        pass
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_worker())
+    asyncio.run(main())

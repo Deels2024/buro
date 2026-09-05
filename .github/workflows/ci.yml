@@ -110,9 +110,62 @@ jobs:
           ./scripts/backup.sh
           ./scripts/restore-check.sh "$BACKUP_DIR"/*.tar.age
           ./scripts/check-release.sh "$(git rev-parse HEAD)"
+      - name: Package tested web files and verify production delivery
+        run: |
+          ./scripts/package-web-release.sh
+          ./scripts/test-web-delivery.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-runtime
+          path: .releases/artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
       - name: Show service status on failure
         if: failure()
-        run: docker compose ps --all
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail 80 worker
       - name: Stop test stack
         if: always()
         run: docker compose down --volumes
+
+  publish-runtime:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [stack]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-runtime
+          path: runtime
+      - name: Publish verified files for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd runtime
+          sha256sum -c web.sha256
+          test "$(tar -xOf web.tar.gz ./release-sha.txt)" = "$RELEASE_SHA"
+          tag="runtime-$RELEASE_SHA"
+          if gh release view "$tag" --json isDraft --jq .isDraft > /tmp/release-draft 2>/dev/null; then
+            if [[ "$(cat /tmp/release-draft)" != "true" ]]; then
+              # Re-runs preserve an already published artifact for this SHA.
+              mkdir existing
+              gh release download "$tag" --pattern 'web.*' --dir existing
+              (cd existing && sha256sum -c web.sha256)
+              test "$(tar -xOf existing/web.tar.gz ./release-sha.txt)" = "$RELEASE_SHA"
+              exit 0
+            fi
+          else
+            gh release create "$tag" --target "$RELEASE_SHA" --draft --prerelease --latest=false \
+              --title "Tested runtime $RELEASE_SHA" \
+              --notes 'Flutter files built and smoke-tested in CI. Contains no production data or credentials.'
+          fi
+          gh release upload "$tag" web.tar.gz web.sha256 --clobber
+          gh release edit "$tag" --draft=false --prerelease --latest=false
