@@ -68,6 +68,7 @@ class _BureauNakhodokAppState extends State<BureauNakhodokApp> {
           animation: _controller,
           builder: (context, _) => switch (_controller.state) {
             AppSessionState.initializing => const _AppSplash(),
+            AppSessionState.unavailable => _SessionRetry(controller: _controller),
             AppSessionState.signedOut => Uri.base.queryParameters['action'] != null ? const AuthPage() : const OnboardingPage(),
             AppSessionState.signedIn => const UserShell(),
           },
@@ -75,6 +76,46 @@ class _BureauNakhodokAppState extends State<BureauNakhodokApp> {
       ),
     );
   }
+}
+
+class _SessionRetry extends StatelessWidget {
+  const _SessionRetry({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_rounded, size: 48),
+              const SizedBox(height: 20),
+              Text(
+                'Не удалось подключиться',
+                style: Theme.of(context).textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Повторите подключение, чтобы продолжить вход. '
+                'Заново запрашивать SMS-код не нужно.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: controller.initialize,
+                child: const Text('Повторить подключение'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _AppSplash extends StatelessWidget {
