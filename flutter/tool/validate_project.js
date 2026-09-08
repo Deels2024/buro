@@ -3,6 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 
+require('./pwa_launch_test.js');
+
 const root = path.resolve(__dirname, '..');
 const requiredFiles = [
   'pubspec.yaml',
@@ -26,6 +28,7 @@ const requiredFiles = [
   'web/robots.txt',
   'web/sitemap.xml',
   'web/site.webmanifest',
+  'web/pwa-launch.js',
   'web/favicon.svg',
   'web/icons/icon-180.png',
   'web/icons/icon-192.png',
@@ -151,6 +154,7 @@ if (fs.existsSync(buildRoot)) {
     'robots.txt',
     'sitemap.xml',
     'site.webmanifest',
+    'pwa-launch.js',
     'favicon.svg',
     'og-image.png',
     'icons/icon-180.png',

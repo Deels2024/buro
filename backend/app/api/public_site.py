@@ -43,6 +43,9 @@ def page(title: str, description: str, path: str, body: str, *, noindex: bool = 
     html = f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(title)} | Бюро находок</title><meta name="description" content="{escape(description)}"><meta name="robots" content="{'noindex, follow' if noindex else 'index, follow'}">
 <link rel="canonical" href="{ORIGIN}{escape(path)}"><meta property="og:title" content="{escape(title)}"><meta property="og:description" content="{escape(description)}"><meta property="og:url" content="{ORIGIN}{escape(path)}"><meta property="og:type" content="website"><meta property="og:image" content="{ORIGIN}/og-image.png">
+<link rel="manifest" href="/site.webmanifest"><link rel="apple-touch-icon" href="/icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Бюро находок"><meta name="theme-color" content="#1769ff">
+<script src="/pwa-launch.js" defer></script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/public.css"><script type="application/ld+json">{data}</script></head><body>
 <a class="skip" href="#content">К содержанию</a><header><div class="nav"><a class="brand" href="/">Бюро находок</a><nav aria-label="Основная навигация"><a href="/naydennye-veshchi/">Находки</a><a href="/poteryannye-veshchi/">Пропажи</a><a href="/organizations/">Организациям</a></nav><a class="button secondary" href="/app/">Личный кабинет</a></div></header>
 <main id="content">{body}</main><footer><div class="footer"><span>Бюро находок · Помогаем вещам вернуться домой</span><nav aria-label="Справка"><a href="/poteryal-veshch/">Потеряли вещь?</a><a href="/nashel-veshch/">Нашли вещь?</a><a href="/app/?action=support">Поддержка</a></nav></div></footer></body></html>'''
