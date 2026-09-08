@@ -146,6 +146,20 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Explicit recovery when a saved session cannot be read. This only forgets
+  // this device's credentials; it cannot revoke an unreadable server session.
+  Future<void> resetSavedSession() async {
+    await api.tokenStore.write(null);
+    currentUser = null;
+    organizations = const [];
+    selectedOrganization = null;
+    pendingPhone = null;
+    mfaTicket = null;
+    lastError = null;
+    state = AppSessionState.signedOut;
+    notifyListeners();
+  }
+
   String _message(Object error) => error is BureauApiException
       ? error.toString()
       : 'Неизвестная ошибка: $error';
