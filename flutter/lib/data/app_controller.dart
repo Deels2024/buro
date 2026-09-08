@@ -5,7 +5,7 @@ import 'api_config.dart';
 import 'bureau_api_client.dart';
 import 'secure_token_store.dart';
 
-enum AppSessionState { initializing, signedOut, signedIn }
+enum AppSessionState { initializing, signedOut, signedIn, unavailable }
 
 class AppController extends ChangeNotifier {
   AppController({BureauApiClient? api})
@@ -32,24 +32,38 @@ class AppController extends ChangeNotifier {
   bool get hasOrganization => organizations.isNotEmpty;
 
   Future<void> initialize() async {
+    state = AppSessionState.initializing;
+    lastError = null;
+    notifyListeners();
     try {
       bootstrap = await api.bootstrap();
     } catch (error) {
       lastError = _message(error);
     }
-    final tokens = await api.tokenStore.read();
-    if (tokens == null) {
-      state = AppSessionState.signedOut;
-      notifyListeners();
-      return;
-    }
     try {
+      final tokens = await api.tokenStore.read();
+      if (tokens == null) {
+        state = AppSessionState.signedOut;
+        notifyListeners();
+        return;
+      }
       await refreshIdentity();
+      lastError = null;
       state = AppSessionState.signedIn;
     } on BureauApiException catch (error) {
-      if (error.isUnauthorized) await api.tokenStore.write(null);
       lastError = _message(error);
-      state = AppSessionState.signedOut;
+      if (error.isUnauthorized) {
+        await api.tokenStore.write(null);
+        currentUser = null;
+        organizations = const [];
+        selectedOrganization = null;
+        state = AppSessionState.signedOut;
+      } else {
+        state = AppSessionState.unavailable;
+      }
+    } catch (_) {
+      lastError = 'Не удалось восстановить вход. Попробуйте ещё раз.';
+      state = AppSessionState.unavailable;
     }
     notifyListeners();
   }

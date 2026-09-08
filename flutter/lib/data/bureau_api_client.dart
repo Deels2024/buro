@@ -140,11 +140,12 @@ class BureauApiClient {
         authenticated &&
         retry401 &&
         tokens != null) {
-      try {
+      // A delayed 401 can arrive after another request has rotated the tokens.
+      // Reuse that session rather than consuming its refresh token again.
+      final latest = await tokenStore.read();
+      if (latest == null) throw BureauApiException(401, 'Сессия завершена');
+      if (latest.accessToken == tokens.accessToken) {
         await _refresh();
-      } on BureauApiException {
-        await tokenStore.write(null);
-        rethrow;
       }
       return request(
         method,
@@ -207,15 +208,28 @@ class BureauApiClient {
     final future = () async {
       final current = await tokenStore.read();
       if (current == null) throw BureauApiException(401, 'Сессия отсутствует');
-      final json = _map(
-        await request(
-          'POST',
-          '/auth/refresh',
-          body: {'refresh_token': current.refreshToken},
-          authenticated: false,
-          retry401: false,
-        ),
-      );
+      late JsonMap json;
+      try {
+        json = _map(
+          await request(
+            'POST',
+            '/auth/refresh',
+            body: {'refresh_token': current.refreshToken},
+            authenticated: false,
+            retry401: false,
+          ),
+        );
+      } on BureauApiException catch (error) {
+        // Network failures, rate limits and 5xx do not invalidate a session.
+        if (error.isUnauthorized &&
+            (await tokenStore.read())?.refreshToken == current.refreshToken) {
+          await tokenStore.write(null);
+        }
+        rethrow;
+      }
+      if ((await tokenStore.read())?.refreshToken != current.refreshToken) {
+        throw BureauApiException(401, 'Сессия изменилась');
+      }
       final tokens = BureauTokens.fromJson(json);
       await tokenStore.write(tokens);
       return tokens;

@@ -30,9 +30,10 @@ class SecureBureauTokenStore implements BureauTokenStore {
   @override
   Future<BureauTokens?> read() async {
     if (_loaded) return _cached;
-    _loaded = true;
     if (_usesMemoryOnlyWebSession) return null;
     final raw = await _storage.read(key: _key);
+    // A failed storage read must remain retryable instead of caching logout.
+    _loaded = true;
     if (raw == null || raw.isEmpty) return null;
     try {
       _cached = BureauTokens.fromJson(
