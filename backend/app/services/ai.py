@@ -1,8 +1,10 @@
+import asyncio
 import logging
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
+from fastapi import HTTPException
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
 from app.core.config import settings
 from app.schemas import AIItemDescription
@@ -41,7 +43,7 @@ class AIService:
         user_hint: str = "",
     ) -> AIItemDescription:
         if not self.openai:
-            return self._fallback_description(kind, user_hint)
+            raise HTTPException(503, "ИИ-описание не настроено. Заполните описание вручную. [AI_CONFIG]")
 
         prompt = (
             "Проанализируй фотографию потерянной или найденной вещи для российского бюро находок. "
@@ -50,21 +52,36 @@ class AIService:
             "пустой массив, не выдумывай. "
             f"Тип публикации: {kind}. Подсказка пользователя: {user_hint or 'нет'}."
         )
-        response = await self.openai.responses.parse(
-            model=settings.openai_model,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": prompt},
-                        {"type": "input_image", "image_url": image_url, "detail": "auto"},
+        try:
+            async with asyncio.timeout(45):
+                response = await self.openai.with_options(timeout=40, max_retries=0).responses.parse(
+                    model=settings.openai_model,
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": prompt},
+                                {"type": "input_image", "image_url": image_url, "detail": "auto"},
+                            ],
+                        }
                     ],
-                }
-            ],
-            text_format=AIItemDescription,
-        )
+                    text_format=AIItemDescription,
+                    store=False,
+                )
+        except (APITimeoutError, TimeoutError) as exc:
+            raise HTTPException(504, "ИИ не успел обработать фото. Попробуйте ещё раз. [AI_TIMEOUT]") from exc
+        except APIConnectionError as exc:
+            raise HTTPException(503, "Нет связи с ИИ. Можно заполнить описание вручную. [AI_CONNECTION]") from exc
+        except APIStatusError as exc:
+            # Never expose upstream response bodies, credentials, or image URLs.
+            logger.warning("OpenAI description failed: status=%s request_id=%s", exc.status_code, exc.request_id)
+            code = {401: "AI_AUTH", 403: "AI_ACCESS", 404: "AI_MODEL", 429: "AI_LIMIT", 400: "AI_INPUT"}.get(exc.status_code, "AI_UPSTREAM")
+            message = "Лимит ИИ временно исчерпан." if exc.status_code == 429 else "ИИ временно недоступен."
+            raise HTTPException(503, f"{message} Можно заполнить описание вручную. [{code}]") from exc
+        except ValueError as exc:
+            raise HTTPException(502, "ИИ вернул некорректное описание. Попробуйте ещё раз. [AI_FORMAT]") from exc
         if not response.output_parsed:
-            raise RuntimeError("ИИ не вернул структурированное описание")
+            raise HTTPException(502, "ИИ не смог описать это фото. Попробуйте другое. [AI_EMPTY]")
         return response.output_parsed
 
     async def image_embedding(self, image_url: str) -> list[float] | None:
@@ -98,20 +115,6 @@ class AIService:
         except (httpx.HTTPError, KeyError, TypeError, ValueError):
             logger.exception("OpenCLIP text embedding failed")
             return None
-
-    @staticmethod
-    def _fallback_description(kind: str, hint: str) -> AIItemDescription:
-        clean_hint = hint.strip() or "Вещь без дополнительного описания"
-        return AIItemDescription(
-            title=clean_hint[:80],
-            category="Другое",
-            description=clean_hint,
-            tags=[kind, "требует уточнения"],
-            colors=[],
-            distinctive_features=[],
-            sensitive_details_to_hide=[],
-            confidence=0.2,
-        )
 
 
 ai_service = AIService()
