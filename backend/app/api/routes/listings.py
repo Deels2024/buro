@@ -1,3 +1,6 @@
+import asyncio
+import base64
+
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -256,12 +259,23 @@ async def update_listing(payload: ListingUpdate, listing_id: UUID, db: DB, user:
 
 @router.post("/ai/describe", response_model=AIItemDescription)
 async def describe_with_ai(payload: AIDescribeRequest, db: DB, user: CurrentUser) -> AIItemDescription:
-    if not await rate_limit(f"rate:ai:{user.id}", 60, 3600):
-        raise HTTPException(status_code=429, detail="Лимит ИИ-запросов исчерпан")
     media = await db.get(MediaObject, payload.media_id)
     if not media or media.owner_id != user.id or not media.mime_type.startswith("image/"):
         raise HTTPException(status_code=404, detail="Фотография не найдена")
-    image_url = storage.presign_download(media.object_key)
+    if media.status in {"rejected", "blocked"}:
+        raise HTTPException(422, "Фотография не прошла проверку. Загрузите другое фото.")
+    if media.status != "ready":
+        raise HTTPException(409, "Фотография ещё обрабатывается. Попробуйте через несколько секунд.")
+    if not await rate_limit(f"rate:ai:{user.id}", 60, 3600):
+        raise HTTPException(status_code=429, detail="Лимит ИИ-запросов исчерпан")
+    # The worker replaces/deletes the original upload. Use only the stable,
+    # validated object and send bytes, so OpenAI need not fetch a signed URL.
+    try:
+        async with asyncio.timeout(10):
+            content = await asyncio.to_thread(storage.read_bytes, media.object_key)
+    except Exception as exc:
+        raise HTTPException(503, "Не удалось прочитать фото. Попробуйте ещё раз. [AI_PHOTO]") from exc
+    image_url = f"data:{media.mime_type};base64,{base64.b64encode(content).decode('ascii')}"
     return await ai_service.describe_item(image_url, payload.kind, payload.user_hint)
 
 

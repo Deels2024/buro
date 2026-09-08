@@ -103,6 +103,7 @@ class BureauApiClient {
     bool authenticated = true,
     bool retry401 = true,
     String? idempotencyKey,
+    Duration timeout = const Duration(seconds: 30),
   }) async {
     final headers = <String, String>{'Accept': 'application/json'};
     if (body != null) {
@@ -123,7 +124,7 @@ class BureauApiClient {
               ..body = body == null ? '' : jsonEncode(body),
           )
           .then(http.Response.fromStream)
-          .timeout(const Duration(seconds: 30));
+          .timeout(timeout);
     } on TimeoutException {
       throw BureauApiException(
         0,
@@ -155,6 +156,7 @@ class BureauApiClient {
         authenticated: authenticated,
         retry401: false,
         idempotencyKey: idempotencyKey,
+        timeout: timeout,
       );
     }
 
@@ -162,7 +164,7 @@ class BureauApiClient {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw BureauApiException(
         response.statusCode,
-        _errorDetail(decoded),
+        _errorDetail(decoded, response.statusCode),
         requestId: response.headers['x-request-id'],
       );
     }
@@ -178,8 +180,10 @@ class BureauApiClient {
     }
   }
 
-  String _errorDetail(dynamic decoded) {
-    if (decoded is! JsonMap) return 'Ошибка API';
+  String _errorDetail(dynamic decoded, int statusCode) {
+    if (decoded is! JsonMap) {
+      return 'Сервер не смог выполнить запрос (HTTP $statusCode). Попробуйте ещё раз.';
+    }
     final detail = decoded['detail'];
     if (detail is String) return detail;
     if (detail is List) {
@@ -353,14 +357,24 @@ class BureauApiClient {
     String mediaId,
     String kind, {
     String hint = '',
-  }) async => _map(
-    await request(
-      'POST',
-      '/listings/ai/describe',
-      body: {'media_id': mediaId, 'kind': kind, 'user_hint': hint},
-      idempotencyKey: newIdempotencyKey(),
-    ),
-  );
+  }) async {
+    // A completed upload can still be undergoing validation in the worker.
+    // Retry only that state, never an OpenAI failure or a successful paid call.
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return _map(await request(
+          'POST',
+          '/listings/ai/describe',
+          body: {'media_id': mediaId, 'kind': kind, 'user_hint': hint},
+          idempotencyKey: newIdempotencyKey(),
+          timeout: const Duration(seconds: 65),
+        ));
+      } on BureauApiException catch (error) {
+        if (!error.isConflict || attempt >= 15) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  }
   Future<List<JsonMap>> photoSearch(
     String mediaId, {
     String? targetKind,
