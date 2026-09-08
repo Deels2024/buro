@@ -23,8 +23,8 @@ void main() {
         calls++;
         keys.add(request.headers['Idempotency-Key']);
         return calls == 1
-            ? http.Response(jsonEncode({'detail': 'Фото обрабатывается'}), 409)
-            : http.Response(jsonEncode({'title': 'Рюкзак'}), 200);
+            ? http.Response(jsonEncode({'detail': 'Фото обрабатывается'}), 409, headers: {'content-type': 'application/json'})
+            : http.Response(jsonEncode({'title': 'Рюкзак'}), 200, headers: {'content-type': 'application/json'});
       }),
     );
     expect((await api.describeMedia('photo', 'found'))['title'], 'Рюкзак');
@@ -40,7 +40,7 @@ void main() {
       tokenStore: _Tokens(),
       httpClient: MockClient((request) async {
         calls++;
-        return http.Response(jsonEncode({'detail': 'ИИ недоступен. [AI_ACCESS]'}), 503);
+        return http.Response(jsonEncode({'detail': 'ИИ недоступен. [AI_ACCESS]'}), 503, headers: {'content-type': 'application/json'});
       }),
     );
     await expectLater(api.describeMedia('photo', 'found'),
