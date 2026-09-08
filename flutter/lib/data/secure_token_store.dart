@@ -32,28 +32,33 @@ class SecureBureauTokenStore implements BureauTokenStore {
     if (_loaded) return _cached;
     if (_usesMemoryOnlyWebSession) return null;
     final raw = await _storage.read(key: _key);
-    // A failed storage read must remain retryable instead of caching logout.
-    _loaded = true;
-    if (raw == null || raw.isEmpty) return null;
-    try {
-      _cached = BureauTokens.fromJson(
-        Map<String, dynamic>.from(jsonDecode(raw) as Map),
-      );
-    } on FormatException {
-      await _storage.delete(key: _key);
+    // The web plugin also returns null when decryption fails. An existing
+    // encrypted record is not a logout; leave it intact and allow a retry.
+    if (raw == null) {
+      if (await _storage.containsKey(key: _key)) {
+        throw StateError('Saved session could not be read');
+      }
+      _loaded = true;
+      return null;
     }
+    _cached = BureauTokens.fromJson(
+      Map<String, dynamic>.from(jsonDecode(raw) as Map),
+    );
+    _loaded = true;
     return _cached;
   }
 
   @override
   Future<void> write(BureauTokens? tokens) async {
-    _loaded = true;
-    _cached = tokens;
-    if (_usesMemoryOnlyWebSession) return;
-    if (tokens == null) {
-      await _storage.delete(key: _key);
-    } else {
-      await _storage.write(key: _key, value: jsonEncode(tokens.toJson()));
+    if (!_usesMemoryOnlyWebSession) {
+      if (tokens == null) {
+        await _storage.delete(key: _key);
+      } else {
+        await _storage.write(key: _key, value: jsonEncode(tokens.toJson()));
+      }
     }
+    // Never expose a successful in-memory login before persistence succeeds.
+    _cached = tokens;
+    _loaded = true;
   }
 }

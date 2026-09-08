@@ -83,6 +83,38 @@ class _SessionRetry extends StatelessWidget {
 
   final AppController controller;
 
+  Future<void> _signInAgain(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Войти заново?'),
+        content: const Text(
+          'Сохранённый вход на этом устройстве будет сброшен. '
+          'Для нового входа понадобится SMS-код.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Сбросить вход'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await controller.resetSavedSession();
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось сбросить вход. Попробуйте ещё раз.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
@@ -101,14 +133,18 @@ class _SessionRetry extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Повторите подключение, чтобы продолжить вход. '
-                'Заново запрашивать SMS-код не нужно.',
+                'Сохранённый вход пока не удалось восстановить. '
+                'Попробуйте подключиться ещё раз.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
               FilledButton(
                 onPressed: controller.initialize,
                 child: const Text('Повторить подключение'),
+              ),
+              TextButton(
+                onPressed: () => _signInAgain(context),
+                child: const Text('Войти заново'),
               ),
             ],
           ),

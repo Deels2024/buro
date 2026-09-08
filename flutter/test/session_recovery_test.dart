@@ -190,4 +190,25 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
+
+  testWidgets('forgetting an unreadable login requires explicit confirmation', (tester) async {
+    final saved = SavedTokens()..unavailable = true;
+    final controller = AppController(api: client(saved, (request) async => jsonResponse({})));
+    await controller.initialize();
+    await tester.pumpWidget(BureauNakhodokApp(controller: controller));
+    await tester.tap(find.text('Войти заново'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(saved.tokens, oldTokens);
+    expect(controller.state, AppSessionState.unavailable);
+    await tester.tap(find.text('Войти заново'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Сбросить вход'));
+    await tester.pumpAndSettle();
+    expect(saved.tokens, isNull);
+    expect(controller.state, AppSessionState.signedOut);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
 }
