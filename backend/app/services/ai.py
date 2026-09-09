@@ -74,12 +74,13 @@ class AIService:
             "text_format": AIItemDescription,
             "store": False,
         }
+        initial = None
         try:
-            async with asyncio.timeout(45):
-                async with asyncio.timeout(25):
-                    response = await self.openai.with_options(timeout=25, max_retries=0).responses.parse(
-                        model=settings.openai_description_model, **request,
-                    )
+            # One minute for the entire AI operation, including optional refinement.
+            async with asyncio.timeout(60):
+                response = await self.openai.with_options(timeout=60, max_retries=0).responses.parse(
+                    model=settings.openai_description_model, **request,
+                )
                 initial = response.output_parsed
                 fallback = settings.openai_description_fallback_model.strip()
                 if (initial and not initial.photo_retake_needed and fallback
@@ -97,6 +98,8 @@ class AIService:
                     except (APIStatusError, APIConnectionError, TimeoutError, ValueError):
                         logger.warning("OpenAI optional refinement unavailable; keeping initial description")
         except (APITimeoutError, TimeoutError) as exc:
+            if initial is not None:
+                return initial
             raise HTTPException(504, "ИИ не успел обработать фото. Попробуйте ещё раз. [AI_TIMEOUT]") from exc
         except APIConnectionError as exc:
             raise HTTPException(503, "Нет связи с ИИ. Можно заполнить описание вручную. [AI_CONNECTION]") from exc

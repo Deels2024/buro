@@ -30,7 +30,7 @@ async def test_description_sends_image_and_disables_response_storage():
     sent = parse.call_args.kwargs
     assert sent["input"][0]["content"][1]["image_url"] == image
     assert sent["store"] is False
-    service.openai.with_options.assert_called_once_with(timeout=25, max_retries=0)
+    service.openai.with_options.assert_called_once_with(timeout=60, max_retries=0)
 
 
 async def test_missing_key_is_not_reported_as_success():
