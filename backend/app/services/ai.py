@@ -8,13 +8,14 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpe
 
 from app.core.config import settings
 from app.schemas import AIItemDescription
+from app.services.openai_client import build_openai_client
 
 logger = logging.getLogger(__name__)
 
 
 class AIService:
     def __init__(self) -> None:
-        self.openai = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self.openai = build_openai_client(settings.openai_api_key) if settings.openai_api_key else None
         self._retired_openai_clients: list[AsyncOpenAI] = []
 
     @property
@@ -25,7 +26,7 @@ class AIService:
         # Attribute replacement is atomic. Requests already using the previous
         # client can finish while all new requests immediately use this key.
         previous_client = self.openai
-        self.openai = AsyncOpenAI(api_key=api_key)
+        self.openai = build_openai_client(api_key)
         if previous_client:
             self._retired_openai_clients.append(previous_client)
 
