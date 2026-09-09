@@ -11,3 +11,6 @@ assert data.get("worker")=="ok", "Worker has not activated the release"
 print("Active API and worker release:",expected)
 ' "$BN_RELEASE_SHA"
 ./scripts/check.sh
+
+# One real vision call on production releases; no user photos or secrets in logs.
+docker compose exec -T api python -m app.services.openai_probe

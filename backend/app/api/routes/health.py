@@ -27,6 +27,7 @@ async def ready(db: DB) -> dict[str, str]:
         "redis": "ok",
         "openai": "configured" if ai_service.openai_configured else "fallback",
         "openai_model": settings.openai_model,
+        "openai_proxy": "configured" if settings.openai_proxy_address.strip() else "direct",
         "version": "0.2.0",
         "release_sha": settings.release_sha,
         "sms": "configured" if settings.smsc_is_configured else "development",

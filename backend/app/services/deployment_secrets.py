@@ -4,10 +4,9 @@ import os
 import tempfile
 from pathlib import Path
 
-from openai import AsyncOpenAI
-
 from app.core.config import settings
 from app.services.ai import ai_service
+from app.services.openai_client import build_openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ def validate_openai_key_format(api_key: str) -> None:
 
 
 async def validate_openai_key(api_key: str) -> None:
-    client = AsyncOpenAI(api_key=api_key, timeout=30, max_retries=1)
+    client = build_openai_client(api_key, timeout=30, max_retries=1)
     try:
         response = await client.responses.create(
             model=settings.openai_model,

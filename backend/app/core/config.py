@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_api_key_file: str = ""
     openai_model: str = "gpt-5.6"
+    openai_proxy_address: str = Field(default="", repr=False)
+    openai_proxy_port: str = ""
+    openai_proxy_scheme: str = "http"
+    openai_proxy_login: str = Field(default="", repr=False)
+    openai_proxy_password: str = Field(default="", repr=False)
     openclip_url: str = "http://localhost:8090"
     openclip_timeout_seconds: int = 20
 
