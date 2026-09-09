@@ -28,7 +28,7 @@ async def main() -> None:
         )
         if not result.title.strip() or not result.description.strip():
             raise HTTPException(502, "[AI_EMPTY]")
-        print(json.dumps({"openai_vision": "ok", "openai_proxy": proxy, "model": settings.openai_model}))
+        print(json.dumps({"openai_vision": "ok", "openai_proxy": proxy, "model": settings.openai_description_model}))
     except HTTPException as exc:
         match = re.search(r"\[AI_[A-Z_]+\]", str(exc.detail))
         print(json.dumps({"openai_vision": "failed", "openai_proxy": proxy,
