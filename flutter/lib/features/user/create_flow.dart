@@ -36,6 +36,9 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   final _description = TextEditingController();
   final _category = TextEditingController(text: 'other');
   final _features = TextEditingController();
+  final _tags = TextEditingController();
+  bool _aiFilled = false;
+  bool _aiNeedsReview = false;
   final _hidden = TextEditingController();
   final _region = TextEditingController();
   final _address = TextEditingController();
@@ -59,6 +62,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       _description,
       _category,
       _features,
+      _tags,
       _hidden,
       _region,
       _address,
@@ -112,13 +116,28 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
         context,
         listen: false,
       ).api.describeMedia(_media.first.id, _found ? 'found' : 'lost');
+      if (!mounted) return;
+      if (result['photo_retake_needed'] == true) {
+        showApiError(context, BureauApiException(
+          422, 'Не удалось рассмотреть предмет. Добавьте более чёткое фото или заполните описание вручную.',
+        ));
+        return;
+      }
+      _aiFilled = true;
+      _aiNeedsReview = result['needs_clarification'] == true ||
+          ((result['confidence'] as num?) ?? 1) < 0.65;
+      _tags.text = (result['tags'] as List? ?? const []).join(', ');
       _title.text = result['title']?.toString() ?? _title.text;
       _description.text =
           result['description']?.toString() ?? _description.text;
       final category = result['category']?.toString();
       _category.text = categoryLabels.containsKey(category) ? category! : 'other';
-      _features.text = (result['distinctive_features'] as List? ?? const [])
-          .join(', ');
+      _features.text = <String>{
+        ...(result['colors'] as List? ?? const []).map((v) => v.toString()),
+        if (result['brand'] is String && (result['brand'] as String).trim().isNotEmpty)
+          (result['brand'] as String).trim(),
+        ...(result['distinctive_features'] as List? ?? const []).map((v) => v.toString()),
+      }.join(', ');
       _hidden.text = (result['sensitive_details_to_hide'] as List? ?? const [])
           .join(', ');
       if (mounted) showApiSuccess(context, 'ИИ подготовил описание');
@@ -169,7 +188,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       'title': _title.text.trim(),
       'description': _description.text.trim(),
       'category': _category.text.trim(),
-      'tags': _split(_features.text),
+      'tags': _split(_tags.text),
       'public_features': _split(_features.text),
       'hidden_features': _split(_hidden.text),
       'event_at': _eventAt.toUtc().toIso8601String(),
@@ -335,9 +354,11 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   Widget _detailsStep(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      if (_media.isNotEmpty)
+      if (_aiFilled)
         NoticeCard(
-          'ИИ заполнил черновик. Проверьте данные перед продолжением.',
+          _aiNeedsReview
+              ? 'ИИ не уверен в распознавании. Уточните название и признаки перед публикацией.'
+              : 'ИИ заполнил черновик. Проверьте данные перед продолжением.',
           color: _accent,
           background: _soft,
           icon: Icons.auto_awesome_rounded,
@@ -367,6 +388,11 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
         decoration: const InputDecoration(
           hintText: 'чёрный, красная молния, два отделения',
         ),
+      ),
+      const SectionTitle('Поисковые теги'),
+      TextField(
+        controller: _tags,
+        decoration: const InputDecoration(hintText: 'рюкзак, сумка, через запятую'),
       ),
       const SectionTitle('Скрытые признаки'),
       TextField(

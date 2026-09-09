@@ -203,6 +203,10 @@ class ListingPage(APIModel):
 
 
 class AIItemDescription(APIModel):
+    item_type: str | None = None
+    brand: str | None = None
+    needs_clarification: bool = False
+    photo_retake_needed: bool = False
     title: str
     category: str
     description: str

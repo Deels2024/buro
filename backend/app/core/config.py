@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_api_key_file: str = ""
     openai_model: str = "gpt-5.6"
+    openai_description_model: str = "gpt-5.6-luna"
+    openai_description_fallback_model: str = "gpt-5.6-terra"
     openai_proxy_address: str = Field(default="", repr=False)
     openai_proxy_port: str = ""
     openai_proxy_scheme: str = "http"
