@@ -6446,6 +6446,38 @@
       },
       "AIItemDescription": {
         "properties": {
+          "item_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Type"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "needs_clarification": {
+            "type": "boolean",
+            "title": "Needs Clarification",
+            "default": false
+          },
+          "photo_retake_needed": {
+            "type": "boolean",
+            "title": "Photo Retake Needed",
+            "default": false
+          },
           "title": {
             "type": "string",
             "title": "Title"
