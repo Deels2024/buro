@@ -367,7 +367,8 @@ class BureauApiClient {
           '/listings/ai/describe',
           body: {'media_id': mediaId, 'kind': kind, 'user_hint': hint},
           idempotencyKey: newIdempotencyKey(),
-          timeout: const Duration(seconds: 65),
+          // Allow photo retrieval, the 60-second AI budget and network overhead.
+          timeout: const Duration(seconds: 90),
         ));
       } on BureauApiException catch (error) {
         if (!error.isConflict || attempt >= 15) rethrow;
