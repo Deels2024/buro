@@ -7,7 +7,7 @@ from fastapi import HTTPException, Response
 from pydantic import ValidationError
 
 from app.api.routes import maps
-from app.services import yandex_maps
+from app.services import yandex_maps, yandex_probe
 
 
 def test_geocoder_longitude_latitude_order_and_city():
@@ -72,3 +72,26 @@ async def test_provider_rejection_does_not_expose_key(monkeypatch):
     assert "MAPS_ACCESS" in exc.value.detail
     assert "private-key" not in exc.value.detail
     assert factory.call_args.kwargs["trust_env"] is False
+
+
+@pytest.mark.parametrize("rejected", [False, True])
+async def test_release_probe_checks_real_results_without_logging_keys(monkeypatch, capsys, rejected):
+    monkeypatch.setattr(yandex_probe.settings, "environment", "production")
+    for name in ("yandex_maps_js_api_key", "yandex_geocoder_api_key", "yandex_suggest_api_key"):
+        monkeypatch.setattr(yandex_probe.settings, name, "private-test-key")
+    monkeypatch.setattr(yandex_probe, "budget", AsyncMock())
+    request = AsyncMock(return_value={})
+    if rejected:
+        request.side_effect = HTTPException(503, "[MAPS_ACCESS] private-test-key")
+    monkeypatch.setattr(yandex_probe, "provider_request", request)
+    monkeypatch.setattr(yandex_probe, "parse_geocode", lambda data: {"region": "Москва"})
+    monkeypatch.setattr(yandex_probe, "parse_suggestions", lambda data: [{"title": "Москва"}])
+    if rejected:
+        with pytest.raises(SystemExit):
+            await yandex_probe.main()
+    else:
+        await yandex_probe.main()
+    output = capsys.readouterr().out
+    assert '"yandex_maps": "failed"' in output if rejected else '"yandex_maps": "ok"' in output
+    assert "private-test-key" not in output
+    assert request.await_count == 2
