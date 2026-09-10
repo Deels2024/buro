@@ -2,9 +2,10 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from sqlalchemy import select, update
 
 from app.api.deps import DB, CurrentUser
@@ -310,8 +311,12 @@ async def disable_admin_2fa(payload: TOTPEnableRequest, user: CurrentUser, db: D
 
 
 @router.post("/refresh", response_model=TokenPair)
-async def refresh(payload: RefreshRequest, db: DB) -> TokenPair:
+async def refresh(
+    payload: RefreshRequest, db: DB,
+    operation: Annotated[str | None, Header(alias="X-Refresh-Operation", min_length=32, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")] = None,
+) -> TokenPair:
     token_hash = hash_secret(payload.refresh_token)
+    recovery_key = "refresh:recovery:" + hash_secret(f"{token_hash}|{operation}") if operation else None
     now = datetime.now(UTC)
     # Only one concurrent request may consume this refresh token. The SQL
     # predicate is rechecked under the row lock by PostgreSQL.
@@ -325,6 +330,18 @@ async def refresh(payload: RefreshRequest, db: DB) -> TokenPair:
         .values(revoked_at=now)
         .returning(RefreshToken)
     )
+    recovered_raw = None
+    if not record and recovery_key:
+        # Only the same saved random operation can recover a lost response.
+        # The encrypted result is written before COMMIT, so concurrent callers
+        # waiting on the UPDATE see it after the winner commits.
+        cached = await redis.get(recovery_key)
+        if cached:
+            recovered_raw = decrypt_json(cached)["refresh_token"]
+            record = await db.scalar(select(RefreshToken).where(
+                RefreshToken.token_hash == hash_secret(recovered_raw),
+                RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now,
+            ))
     if not record:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительная сессия")
     user = await db.get(User, record.user_id)
@@ -332,9 +349,13 @@ async def refresh(payload: RefreshRequest, db: DB) -> TokenPair:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Аккаунт недоступен")
     if user.role in {"admin", "moderator"} and user.admin_2fa_enabled and not record.mfa_verified:
         raise HTTPException(status_code=401, detail="Требуется двухфакторная авторизация")
+    if recovered_raw:
+        return _tokens(user, recovered_raw, mfa=record.mfa_verified)
     raw_refresh, _ = await _store_refresh(
         db, user, payload.device_name or record.device_name, mfa=record.mfa_verified
     )
+    if recovery_key:
+        await redis.set(recovery_key, encrypt_json({"refresh_token": raw_refresh}), ex=86400)
     await db.commit()
     return _tokens(user, raw_refresh, mfa=record.mfa_verified)
 

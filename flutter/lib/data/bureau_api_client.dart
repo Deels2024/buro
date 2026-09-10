@@ -28,22 +28,25 @@ class BureauApiException implements Exception {
 }
 
 class BureauTokens {
-  const BureauTokens(this.accessToken, this.refreshToken, this.expiresIn);
+  const BureauTokens(this.accessToken, this.refreshToken, this.expiresIn, {this.refreshOperation});
 
   final String accessToken;
   final String refreshToken;
   final int expiresIn;
+  final String? refreshOperation;
 
   factory BureauTokens.fromJson(JsonMap json) => BureauTokens(
     json['access_token'] as String,
     json['refresh_token'] as String,
     (json['expires_in'] as num).toInt(),
+    refreshOperation: json['refresh_operation'] as String?,
   );
 
   JsonMap toJson() => {
     'access_token': accessToken,
     'refresh_token': refreshToken,
     'expires_in': expiresIn,
+    if (refreshOperation != null) 'refresh_operation': refreshOperation,
   };
 }
 
@@ -103,6 +106,7 @@ class BureauApiClient {
     bool authenticated = true,
     bool retry401 = true,
     String? idempotencyKey,
+    String? refreshOperation,
     Duration timeout = const Duration(seconds: 30),
   }) async {
     final headers = <String, String>{'Accept': 'application/json'};
@@ -110,7 +114,8 @@ class BureauApiClient {
       headers['Content-Type'] = 'application/json; charset=utf-8';
     }
     if (idempotencyKey != null) headers['Idempotency-Key'] = idempotencyKey;
-    final tokens = await tokenStore.read();
+    if (refreshOperation != null) headers['X-Refresh-Operation'] = refreshOperation;
+    final tokens = authenticated ? await tokenStore.read() : null;
     if (authenticated && tokens != null) {
       headers['Authorization'] = 'Bearer ${tokens.accessToken}';
     }
@@ -210,15 +215,24 @@ class BureauApiClient {
   Future<BureauTokens> _refresh() async {
     if (_refreshInFlight != null) return _refreshInFlight!;
     final future = () async {
-      final current = await tokenStore.read();
+      var current = await tokenStore.read();
       if (current == null) throw BureauApiException(401, 'Сессия отсутствует');
+      // Persist a random retry credential before rotating. Reopening after a
+      // lost response can recover this operation without reusing an OTP.
+      if (current.refreshOperation == null) {
+        current = BureauTokens(current.accessToken, current.refreshToken, current.expiresIn,
+          refreshOperation: newIdempotencyKey());
+        await tokenStore.write(current);
+      }
+      final rotating = current;
       late JsonMap json;
       try {
         json = _map(
           await request(
             'POST',
             '/auth/refresh',
-            body: {'refresh_token': current.refreshToken},
+            body: {'refresh_token': rotating.refreshToken},
+            refreshOperation: rotating.refreshOperation,
             authenticated: false,
             retry401: false,
           ),
@@ -226,15 +240,15 @@ class BureauApiClient {
       } on BureauApiException catch (error) {
         // Network failures, rate limits and 5xx do not invalidate a session.
         if (error.isUnauthorized &&
-            (await tokenStore.read())?.refreshToken == current.refreshToken) {
+            (await tokenStore.read())?.refreshToken == rotating.refreshToken) {
           await tokenStore.write(null);
         }
         rethrow;
       }
-      if ((await tokenStore.read())?.refreshToken != current.refreshToken) {
+      if ((await tokenStore.read())?.refreshToken != rotating.refreshToken) {
         throw BureauApiException(401, 'Сессия изменилась');
       }
-      final tokens = BureauTokens.fromJson(json);
+      final tokens = _newTokens(json);
       await tokenStore.write(tokens);
       return tokens;
     }();
@@ -292,7 +306,13 @@ class BureauApiClient {
       _map(await request('PATCH', '/users/me', body: {'display_name': name}));
 
   Future<void> acceptTokens(JsonMap json) async =>
-      tokenStore.write(BureauTokens.fromJson(json));
+      tokenStore.write(_newTokens(json));
+
+  BureauTokens _newTokens(JsonMap json) {
+    final tokens = BureauTokens.fromJson(json);
+    return BureauTokens(tokens.accessToken, tokens.refreshToken, tokens.expiresIn,
+      refreshOperation: newIdempotencyKey());
+  }
 
   Future<void> logout() async {
     final tokens = await tokenStore.read();

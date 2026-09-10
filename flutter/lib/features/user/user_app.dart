@@ -321,15 +321,16 @@ class _VerifyPhonePageState extends State<VerifyPhonePage> {
   Widget build(BuildContext context) {
     final controller = AppScope.of(context);
     final mfa = controller.mfaTicket != null;
+    final recovering = controller.state == AppSessionState.unavailable;
     return BureauPage(
-      title: mfa ? 'Двухфакторная защита' : 'Введите код',
-      subtitle: mfa
+      title: recovering ? 'Вход подтверждён' : mfa ? 'Двухфакторная защита' : 'Введите код',
+      subtitle: recovering ? 'Не удалось загрузить профиль. Повторите подключение без нового SMS.' : mfa
           ? 'Код из приложения-аутентификатора'
           : 'SMS отправлено на ${controller.pendingPhone ?? 'ваш телефон'}',
       child: Column(
         children: [
           const SizedBox(height: 35),
-          TextField(
+          if (!recovering) TextField(
             controller: _code,
             autofocus: true,
             textAlign: TextAlign.center,
@@ -343,9 +344,14 @@ class _VerifyPhonePageState extends State<VerifyPhonePage> {
           ),
           const SizedBox(height: 20),
           ApiButton(
-            label: 'Подтвердить',
+            label: recovering ? 'Повторить подключение' : 'Подтвердить',
             onPressed: () async {
-              if (controller.mfaTicket != null) {
+              if (recovering) {
+                await controller.initialize();
+                if (!controller.isSignedIn) {
+                  throw BureauApiException(0, controller.lastError ?? 'Не удалось восстановить вход');
+                }
+              } else if (controller.mfaTicket != null) {
                 await controller.verifyAdmin2fa(_code.text);
               } else {
                 final complete = await controller.verifyCode(_code.text);
@@ -362,7 +368,7 @@ class _VerifyPhonePageState extends State<VerifyPhonePage> {
             },
           ),
           const SizedBox(height: 18),
-          if (!mfa)
+          if (!mfa && !recovering)
             TextButton(
               onPressed: _retryAfter > 0 || _resending
                   ? null
@@ -2204,4 +2210,3 @@ IconData _notificationIcon(String? kind) {
   if (kind?.contains('handover') == true) return Icons.qr_code_rounded;
   return Icons.notifications_none_rounded;
 }
-

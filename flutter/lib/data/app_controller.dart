@@ -52,8 +52,7 @@ class AppController extends ChangeNotifier {
       state = AppSessionState.signedIn;
     } on BureauApiException catch (error) {
       lastError = _message(error);
-      if (error.isUnauthorized) {
-        await api.tokenStore.write(null);
+      if (error.isUnauthorized && await api.tokenStore.read() == null) {
         currentUser = null;
         organizations = const [];
         selectedOrganization = null;
@@ -108,7 +107,17 @@ class AppController extends ChangeNotifier {
 
   Future<void> _finishLogin(JsonMap tokens) async {
     await api.acceptTokens(tokens);
-    await refreshIdentity();
+    try {
+      await refreshIdentity();
+    } catch (error) {
+      // The SMS was consumed and credentials saved. Retry the profile load,
+      // never ask the user to submit that single-use code again.
+      pendingPhone = null;
+      state = AppSessionState.unavailable;
+      lastError = _message(error);
+      notifyListeners();
+      rethrow;
+    }
     state = AppSessionState.signedIn;
     pendingPhone = null;
     lastError = null;

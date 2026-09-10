@@ -40,6 +40,94 @@ BureauApiClient client(SavedTokens store,
     );
 
 void main() {
+  test('SMS calls do not depend on reading old credentials', () async {
+    final saved = SavedTokens()..unavailable = true;
+    var calls = 0;
+    final api = client(saved, (request) async {
+      calls++;
+      return jsonResponse({'expires_in': 300, 'retry_after': 60});
+    });
+    await api.bootstrap();
+    await api.requestCode('+79991234567');
+    await api.verifyCode('+79991234567', '123456');
+    expect(calls, 3);
+    api.close();
+  });
+
+  test('an unrelated 401 never erases persisted credentials', () async {
+    final saved = SavedTokens();
+    final controller = AppController(api: client(saved, (request) async {
+      if (request.url.path.endsWith('/app/bootstrap')) return jsonResponse({});
+      if (request.url.path.endsWith('/auth/refresh')) return jsonResponse(newTokens.toJson());
+      return jsonResponse({'detail': 'Upstream rejected request'}, 401);
+    }));
+    await controller.initialize();
+    expect(controller.state, AppSessionState.unavailable);
+    expect(saved.tokens?.refreshToken, 'new-refresh');
+    controller.dispose();
+  });
+
+  test('reopening recovers the same refresh operation after a lost response', () async {
+    final saved = SavedTokens();
+    String? operation;
+    var refreshCalls = 0;
+    Future<http.Response> handler(http.Request request) async {
+      if (request.url.path.endsWith('/app/bootstrap')) return jsonResponse({});
+      if (request.url.path.endsWith('/auth/refresh')) {
+        refreshCalls++;
+        final incoming = request.headers['X-Refresh-Operation'];
+        expect(incoming, isNotNull);
+        expect(saved.tokens?.refreshOperation, incoming);
+        if (operation == null) {
+          operation = incoming;
+          throw http.ClientException('Response lost after server committed');
+        }
+        expect(incoming, operation);
+        return jsonResponse(newTokens.toJson());
+      }
+      if (request.headers['Authorization'] == 'Bearer old-access') {
+        return jsonResponse({'detail': 'Expired'}, 401);
+      }
+      if (request.url.path.endsWith('/organizations/mine')) return jsonResponse([]);
+      return jsonResponse({'id': 'user-1', 'role': 'user'});
+    }
+    final first = AppController(api: client(saved, handler));
+    await first.initialize();
+    expect(first.state, AppSessionState.unavailable);
+    first.dispose();
+    final reopened = AppController(api: client(saved, handler));
+    await reopened.initialize();
+    expect(reopened.state, AppSessionState.signedIn);
+    expect(refreshCalls, 2);
+    expect(saved.tokens?.refreshToken, 'new-refresh');
+    reopened.dispose();
+  });
+
+  test('profile outage after verification preserves the completed SMS login', () async {
+    final saved = SavedTokens(null);
+    var profileDown = true;
+    var verificationCalls = 0;
+    final controller = AppController(api: client(saved, (request) async {
+      if (request.url.path.endsWith('/auth/verify-code')) {
+        verificationCalls++;
+        return jsonResponse(newTokens.toJson());
+      }
+      if (request.url.path.endsWith('/app/bootstrap')) return jsonResponse({});
+      if (request.url.path.endsWith('/organizations/mine')) return jsonResponse([]);
+      return profileDown ? jsonResponse({'detail': 'Unavailable'}, 503)
+          : jsonResponse({'id': 'user-1', 'role': 'user'});
+    }));
+    controller.pendingPhone = '+79991234567';
+    await expectLater(controller.verifyCode('123456'), throwsA(isA<BureauApiException>()));
+    expect(controller.state, AppSessionState.unavailable);
+    expect(saved.tokens?.refreshToken, 'new-refresh');
+    profileDown = false;
+    await controller.initialize();
+    expect(controller.state, AppSessionState.signedIn);
+    expect(verificationCalls, 1);
+    controller.dispose();
+  });
+
   for (final failure in [0, 429, 500, 503]) {
     test('refresh failure $failure preserves login across reopening', () async {
       final saved = SavedTokens();
