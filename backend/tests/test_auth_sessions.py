@@ -145,3 +145,48 @@ async def test_operations_are_admin_only_and_do_not_expose_payloads(session_app)
     assert response.json()["failed"] == 1
     assert response.json()["worker"] == "unavailable"
     assert "hidden-user-evidence" not in response.text
+
+
+async def test_lost_refresh_response_can_be_recovered_only_by_same_operation(session_app):
+    client, sessions, fake = session_app
+    user = await add_user(sessions)
+    old = await add_refresh(sessions, user)
+    body = {"refresh_token": old}
+    operation = {"X-Refresh-Operation": uuid4().hex}
+    first = await client.post("/v1/auth/refresh", json=body, headers=operation)
+    assert first.status_code == 200
+    replay = await client.post("/v1/auth/refresh", json=body, headers=operation)
+    assert replay.status_code == 200
+    assert replay.json()["refresh_token"] == first.json()["refresh_token"]
+    assert (await client.post("/v1/auth/refresh", json=body)).status_code == 401
+    assert (await client.post("/v1/auth/refresh", json=body, headers={"X-Refresh-Operation": uuid4().hex})).status_code == 401
+    for key in await fake.keys("refresh:recovery:*"):
+        assert first.json()["refresh_token"] not in await fake.get(key)
+    assert (await client.post("/v1/auth/logout", json={"refresh_token": first.json()["refresh_token"]},
+        headers={"Authorization": "Bearer " + first.json()["access_token"]})).status_code == 200
+    assert (await client.post("/v1/auth/refresh", json=body, headers=operation)).status_code == 401
+
+
+async def test_recovery_cannot_restore_a_blocked_account(session_app):
+    client, sessions, _ = session_app
+    user = await add_user(sessions)
+    old = await add_refresh(sessions, user)
+    operation = {"X-Refresh-Operation": uuid4().hex}
+    body = {"refresh_token": old}
+    assert (await client.post("/v1/auth/refresh", json=body, headers=operation)).status_code == 200
+    async with sessions() as db:
+        saved = await db.get(User, user.id)
+        saved.status = "blocked"
+        await db.commit()
+    assert (await client.post("/v1/auth/refresh", json=body, headers=operation)).status_code == 401
+
+
+async def test_parallel_recovery_returns_one_successor(session_app):
+    client, sessions, _ = session_app
+    user = await add_user(sessions)
+    old = await add_refresh(sessions, user)
+    operation = {"X-Refresh-Operation": uuid4().hex}
+    replies = await asyncio.gather(*(client.post("/v1/auth/refresh", json={"refresh_token": old},
+        headers=operation) for _ in range(6)))
+    assert all(reply.status_code == 200 for reply in replies)
+    assert len({reply.json()["refresh_token"] for reply in replies}) == 1

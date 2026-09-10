@@ -29,7 +29,7 @@ class SecureBureauTokenStore implements BureauTokenStore {
 
   @override
   Future<BureauTokens?> read() async {
-    if (_loaded) return _cached;
+    if (_loaded && (!kIsWeb || _usesMemoryOnlyWebSession)) return _cached;
     if (_usesMemoryOnlyWebSession) return null;
     final raw = await _storage.read(key: _key);
     // The web plugin also returns null when decryption fails. An existing
