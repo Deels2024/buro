@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Выбор места</title><style>
+html,body{height:100%;margin:0;font:15px system-ui,sans-serif;background:#f5f7fb;color:#182430}
+body{display:flex;flex-direction:column}#map{flex:1;min-height:240px}#tools{padding:6px 8px}button{padding:9px 12px;border:1px solid #d5dce5;background:white;border-radius:10px;color:#1769ff;font:inherit;cursor:pointer}#status{font-size:13px;padding-top:5px;min-height:18px}button:disabled{opacity:.6}
+</style></head><body><div id="tools"><button id="locate" hidden>Моё местоположение</button><div id="status" role="status">Загружаем карту…</div></div><div id="map"></div><script src="yandex-map.js"></script></body></html>

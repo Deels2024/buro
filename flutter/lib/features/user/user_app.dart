@@ -1,3 +1,4 @@
+import '../../core/location_editor.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -1535,13 +1536,7 @@ class _SearchFiltersPageState extends State<SearchFiltersPage> {
           decoration: const InputDecoration(hintText: 'Любая категория'),
         ),
         const SectionTitle('Регион'),
-        TextField(
-          controller: _region,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.location_on_outlined),
-            hintText: 'Санкт-Петербург',
-          ),
-        ),
+        MapsTextField(controller: _region, label: 'Город или населённый пункт', cityOnly: true),
         const SectionTitle('Период'),
         DropdownButtonFormField<int>(
           initialValue: _days,
@@ -2209,3 +2204,4 @@ IconData _notificationIcon(String? kind) {
   if (kind?.contains('handover') == true) return Icons.qr_code_rounded;
   return Icons.notifications_none_rounded;
 }
+

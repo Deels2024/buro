@@ -30,9 +30,13 @@ async def ready(db: DB) -> dict[str, str]:
         "openai_fallback_model": settings.openai_description_fallback_model,
         "openai_reasoning": "low",
         "openai_proxy": "configured" if settings.openai_proxy_address.strip() else "direct",
+        "yandex_maps": "configured" if settings.yandex_maps_js_api_key else "missing",
+        "yandex_geocoder": "configured" if settings.yandex_geocoder_api_key else "missing",
+        "yandex_suggest": "configured" if settings.yandex_suggest_api_key else "missing",
         "version": "0.2.0",
         "release_sha": settings.release_sha,
         "sms": "configured" if settings.smsc_is_configured else "development",
         "storage_transport": "https" if settings.s3_public_endpoint.startswith("https://") else "http",
         "worker": "ok" if (await redis.get("bureau:worker:heartbeat") or "").startswith(settings.release_sha + ":") else "unavailable",
     }
+

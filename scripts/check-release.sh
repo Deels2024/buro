@@ -14,3 +14,7 @@ print("Active API and worker release:",expected)
 
 # One real vision call on production releases; no user photos or secrets in logs.
 docker compose exec -T api python -m app.services.openai_probe
+
+# Confirm real geocoder/suggest access using a public city, never user locations.
+docker compose exec -T api python -m app.services.yandex_probe
+

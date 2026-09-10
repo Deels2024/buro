@@ -102,6 +102,10 @@ services:
       BN_S3_ACCESS_KEY: bureau
       BN_S3_SECRET_KEY: "${MINIO_PASSWORD}"
       BN_S3_PRESIGN_TTL_SECONDS: 900
+      BN_YANDEX_MAPS_JS_API_KEY: "${YANDEX_MAPS_JS_API_KEY:-}"
+      BN_YANDEX_GEOCODER_API_KEY: "${YANDEX_GEOCODER_API_KEY:-}"
+      BN_YANDEX_SUGGEST_API_KEY: "${YANDEX_SUGGEST_API_KEY:-}"
+      BN_YANDEX_DAILY_LIMIT: "${YANDEX_DAILY_LIMIT:-100}"
       BN_OPENAI_API_KEY_FILE: /run/bureau-secrets/openai_api_key
       # Reuse the existing deployment .env; proxy only the OpenAI client.
       BN_OPENAI_PROXY_ADDRESS: "${PROXY_ADDRESS:-}"
@@ -236,3 +240,4 @@ volumes:
   minio_data:
   openclip_cache:
   openai_secret:
+
