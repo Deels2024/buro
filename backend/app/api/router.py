@@ -11,6 +11,7 @@ from app.api.routes import (
     health,
     internal_deployment,
     listings,
+    maps,
     media,
     organizations,
     support,
@@ -33,3 +34,6 @@ api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(admin_console.router, prefix="/admin", tags=["admin-console"])
 api_router.include_router(support.router, prefix="/support", tags=["support"])
 api_router.include_router(support.admin_router, prefix="/admin/support", tags=["admin-support"])
+
+
+api_router.include_router(maps.router, prefix="/maps", tags=["maps"])

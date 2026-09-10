@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     s3_presign_ttl_seconds: int = 900
     max_upload_bytes: int = 100 * 1024 * 1024
 
+    yandex_maps_js_api_key: str = Field(default="", repr=False)
+    yandex_geocoder_api_key: str = Field(default="", repr=False)
+    yandex_suggest_api_key: str = Field(default="", repr=False)
+    yandex_daily_limit: int = Field(default=100, ge=1)
+
     openai_api_key: str = ""
     openai_api_key_file: str = ""
     openai_model: str = "gpt-5.6"
@@ -157,3 +162,4 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+

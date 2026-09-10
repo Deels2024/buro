@@ -5,6 +5,7 @@ import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../core/production_widgets.dart';
+import '../../core/location_editor.dart';
 import 'package:latlong2/latlong.dart';
 import '../../data/app_controller.dart';
 import '../../data/bureau_api_client.dart';
@@ -409,22 +410,8 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   Widget _locationStep(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      TextField(
-        controller: _region,
-        decoration: const InputDecoration(
-          prefixIcon: Icon(Icons.location_city_outlined),
-          labelText: 'Город или регион',
-        ),
-      ),
-      const SizedBox(height: 12),
-      ListingMap(listings: const [], selected: _point, onPick: (p) => setState(() => _point = p)),
-      TextField(
-        controller: _address,
-        decoration: const InputDecoration(
-          prefixIcon: Icon(Icons.location_on_outlined),
-          labelText: 'Точное место (будет зашифровано)',
-        ),
-      ),
+      LocationEditor(region: _region, address: _address, selected: _point,
+        onPoint: (p) => setState(() => _point = p)),
       const SizedBox(height: 12),
       SettingRow(
         icon: Icons.calendar_today_outlined,
@@ -591,3 +578,4 @@ class PublicationSuccessPage extends StatelessWidget {
     ),
   );
 }
+

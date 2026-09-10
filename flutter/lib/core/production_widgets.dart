@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import '../data/app_controller.dart';
+import 'yandex_map.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -56,6 +59,11 @@ class ListingMap extends StatelessWidget {
   Widget build(BuildContext context) {
     final located = listings.where((l) => l['approx_latitude'] is num && l['approx_longitude'] is num).toList();
     if (located.isEmpty && onPick == null) return const NoticeCard('В этих объявлениях нет координат. Посмотрите указанные города и районы в списке.');
+    final maps = context.dependOnInheritedWidgetOfExactType<AppScope>()?.notifier?.bootstrap['maps'] as Map?;
+    final jsKey = maps?['javascript_key']?.toString() ?? '';
+    if (kIsWeb && jsKey.isNotEmpty) {
+      return yandexMap(apiKey: jsKey, listings: listings, selected: selected, onPick: onPick, onOpen: onOpen);
+    }
     LatLng point(JsonMap l) => LatLng((l['approx_latitude'] as num).toDouble(), (l['approx_longitude'] as num).toDouble());
     final center = selected ?? (located.isEmpty ? const LatLng(55.75, 37.62) : point(located.first));
     return Column(children: [
@@ -93,3 +101,4 @@ class _ScanHandoverPageState extends State<ScanHandoverPage> {
     const Text('Разрешите доступ к камере. Если камера недоступна, закройте экран и введите код вручную.'),
   ]));
 }
+

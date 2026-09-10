@@ -21,6 +21,12 @@ async def bootstrap(db: DB) -> dict:
     )
     public_settings = {row.key: row.value for row in public_rows}
     return {
+        "maps": {
+            "provider": "yandex" if settings.yandex_maps_js_api_key else "openstreetmap",
+            "javascript_key": settings.yandex_maps_js_api_key,
+            "geocoder": bool(settings.yandex_geocoder_api_key),
+            "suggest": bool(settings.yandex_suggest_api_key),
+        },
         "api_version": "2.0",
         "base_url": settings.public_api_url,
         "minimum_versions": {
@@ -45,3 +51,4 @@ async def bootstrap(db: DB) -> dict:
         "support": {"email": settings.support_email, "in_app": True},
         "settings": public_settings,
     }
+

@@ -6411,6 +6411,105 @@
           }
         }
       }
+    },
+    "/v1/maps/suggest": {
+      "post": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Suggest",
+        "operationId": "suggest_v1_maps_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Suggest V1 Maps Suggest Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/maps/resolve": {
+      "post": {
+        "tags": [
+          "maps"
+        ],
+        "summary": "Resolve",
+        "operationId": "resolve_v1_maps_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Resolve V1 Maps Resolve Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -9069,6 +9168,68 @@
         ],
         "title": "RefreshRequest"
       },
+      "ResolveInput": {
+        "properties": {
+          "query": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query"
+          },
+          "uri": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uri"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 90.0,
+                "minimum": -90.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 180.0,
+                "minimum": -180.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "city_only": {
+            "type": "boolean",
+            "title": "City Only",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ResolveInput"
+      },
       "SessionOut": {
         "properties": {
           "id": {
@@ -9111,6 +9272,30 @@
           "created_at"
         ],
         "title": "SessionOut"
+      },
+      "SuggestInput": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 240,
+            "minLength": 2,
+            "title": "Query"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "city",
+              "address"
+            ],
+            "title": "Kind",
+            "default": "address"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SuggestInput"
       },
       "SupportMessageCreate": {
         "properties": {
