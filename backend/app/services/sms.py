@@ -56,7 +56,8 @@ async def send_otp(phone: str, code: str) -> None:
     except ValueError:
         raise SMSDeliveryError("SMS_PROXY_CONFIG") from None
     try:
-        async with httpx.AsyncClient(timeout=10, proxy=proxy, trust_env=False) as client:
+        transport = httpx.AsyncHTTPTransport(proxy=proxy, local_address="0.0.0.0" if proxy is None else None, retries=0)
+        async with httpx.AsyncClient(timeout=10, transport=transport, trust_env=False) as client:
             response = await client.post(
                 settings.smsc_url,
                 data=_smsc_request_data(phone, code),
@@ -64,8 +65,10 @@ async def send_otp(phone: str, code: str) -> None:
             response.raise_for_status()
             message_id = _smsc_message_id(response.json())
             logger.info("SMSC accepted OTP for %s, message_id=%s", phone[-4:], message_id)
-    except httpx.TimeoutException:
-        raise SMSDeliveryError("SMS_PROXY_TIMEOUT" if proxy else "SMS_TIMEOUT") from None
+    except httpx.TimeoutException as exc:
+        phase = "CONNECT" if isinstance(exc, httpx.ConnectTimeout) else "READ" if isinstance(exc, httpx.ReadTimeout) else "IO"
+        route = "PROXY" if proxy else "IPV4"
+        raise SMSDeliveryError(f"SMS_{route}_{phase}_TIMEOUT") from None
     except httpx.HTTPStatusError as exc:
         raise SMSDeliveryError(f"SMS_HTTP_{exc.response.status_code}") from None
     except httpx.RequestError:

@@ -28,7 +28,7 @@ def test_smsc_response_requires_a_message_id() -> None:
 
 
 @pytest.mark.parametrize("failure,expected", [
-    (httpx.ConnectTimeout("private connection details"), "SMS_TIMEOUT"),
+    (httpx.ConnectTimeout("private connection details"), "SMS_IPV4_CONNECT_TIMEOUT"),
     (httpx.ConnectError("private connection details"), "SMS_NETWORK"),
     (httpx.HTTPStatusError("private response details", request=httpx.Request("POST", "https://smsc.ru/sys/send.php"),
         response=httpx.Response(403)), "SMS_HTTP_403"),
@@ -69,11 +69,15 @@ async def test_sms_outbound_route(monkeypatch, use_proxy, host, expected_proxy):
     client.__aenter__.return_value = client
     client.post.side_effect = httpx.ReadTimeout("private details")
     factory = Mock(return_value=client)
+    transport_factory = Mock()
+    monkeypatch.setattr(sms.httpx, "AsyncHTTPTransport", transport_factory)
     monkeypatch.setattr(sms.httpx, "AsyncClient", factory)
     with pytest.raises(sms.SMSDeliveryError) as captured:
         await sms.send_otp("+79991234567", "123456")
-    assert str(captured.value) == ("SMS_PROXY_TIMEOUT" if expected_proxy else "SMS_TIMEOUT")
-    factory.assert_called_once_with(timeout=10, proxy=expected_proxy, trust_env=False)
+    assert str(captured.value) == ("SMS_PROXY_READ_TIMEOUT" if expected_proxy else "SMS_IPV4_READ_TIMEOUT")
+    factory.assert_called_once()
+    assert factory.call_args.kwargs["trust_env"] is False
+    transport_factory.assert_called_once_with(proxy=expected_proxy, local_address="0.0.0.0" if expected_proxy is None else None, retries=0)
     client.post.assert_awaited_once()
 
 
