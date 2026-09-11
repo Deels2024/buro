@@ -56,7 +56,10 @@ async def send_otp(phone: str, code: str) -> None:
     except ValueError:
         raise SMSDeliveryError("SMS_PROXY_CONFIG") from None
     try:
-        transport = httpx.AsyncHTTPTransport(proxy=proxy, local_address="0.0.0.0" if proxy is None else None, retries=0)
+        # Outbound client source address selects IPv4; this opens no listening socket.
+        transport = httpx.AsyncHTTPTransport(  # nosec B104: outbound IPv4 selection only
+            proxy=proxy, local_address="0.0.0.0" if proxy is None else None, retries=0  # nosec B104
+        )
         async with httpx.AsyncClient(timeout=10, transport=transport, trust_env=False) as client:
             response = await client.post(
                 settings.smsc_url,
