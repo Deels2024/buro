@@ -118,6 +118,7 @@ services:
       BN_OPENAI_MODEL: "${BN_OPENAI_MODEL:-gpt-5.6}"
       BN_OPENCLIP_URL: http://openclip:8090
       BN_OPENCLIP_TIMEOUT_SECONDS: 20
+      BN_SMSC_USE_PROXY: "${BN_SMSC_USE_PROXY:-true}"
       BN_SMSC_URL: "${BN_SMSC_URL:-https://smsc.ru/sys/send.php}"
       BN_SMSC_LOGIN: "${BN_SMSC_LOGIN:-}"
       BN_SMSC_PASSWORD: "${BN_SMSC_PASSWORD:-}"
@@ -240,4 +241,3 @@ volumes:
   minio_data:
   openclip_cache:
   openai_secret:
-

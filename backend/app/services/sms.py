@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.services.openai_client import openai_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,14 @@ async def send_otp(phone: str, code: str) -> None:
         logger.warning("Development SMS code for %s: %s", phone[-4:], code)
         return
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # PROXY_* is the project's configured outbound route. Keep HTTPS
+        # verification enabled and send once: a read timeout is not proof that
+        # the provider did not accept an SMS, so never automatically resend it.
+        proxy = openai_proxy_url(settings) if settings.smsc_use_proxy and settings.openai_proxy_address.strip() else None
+    except ValueError:
+        raise SMSDeliveryError("SMS_PROXY_CONFIG") from None
+    try:
+        async with httpx.AsyncClient(timeout=10, proxy=proxy, trust_env=False) as client:
             response = await client.post(
                 settings.smsc_url,
                 data=_smsc_request_data(phone, code),
@@ -57,10 +65,10 @@ async def send_otp(phone: str, code: str) -> None:
             message_id = _smsc_message_id(response.json())
             logger.info("SMSC accepted OTP for %s, message_id=%s", phone[-4:], message_id)
     except httpx.TimeoutException:
-        raise SMSDeliveryError("SMS_TIMEOUT") from None
+        raise SMSDeliveryError("SMS_PROXY_TIMEOUT" if proxy else "SMS_TIMEOUT") from None
     except httpx.HTTPStatusError as exc:
         raise SMSDeliveryError(f"SMS_HTTP_{exc.response.status_code}") from None
     except httpx.RequestError:
-        raise SMSDeliveryError("SMS_NETWORK") from None
+        raise SMSDeliveryError("SMS_PROXY_NETWORK" if proxy else "SMS_NETWORK") from None
     except ValueError:
         raise SMSDeliveryError("SMS_RESPONSE_FORMAT") from None

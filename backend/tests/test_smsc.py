@@ -49,3 +49,42 @@ def test_provider_error_never_exposes_raw_response():
     with pytest.raises(sms.SMSDeliveryError) as captured:
         sms._smsc_message_id({"error": "private-login private-password 123456", "error_code": 2})
     assert str(captured.value) == "SMSC_2"
+
+
+@pytest.mark.parametrize("use_proxy,host,expected_proxy", [
+    (True, "proxy.example", "http://user:p%40ss@proxy.example:8080"),
+    (False, "proxy.example", None),
+    (True, "", None),
+])
+async def test_sms_outbound_route(monkeypatch, use_proxy, host, expected_proxy):
+    monkeypatch.setattr(settings, "smsc_login", "test-login")
+    monkeypatch.setattr(settings, "smsc_password", "test-password")
+    monkeypatch.setattr(settings, "smsc_use_proxy", use_proxy)
+    monkeypatch.setattr(settings, "openai_proxy_address", host)
+    monkeypatch.setattr(settings, "openai_proxy_port", "8080")
+    monkeypatch.setattr(settings, "openai_proxy_scheme", "http")
+    monkeypatch.setattr(settings, "openai_proxy_login", "user")
+    monkeypatch.setattr(settings, "openai_proxy_password", "p@ss")
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.post.side_effect = httpx.ReadTimeout("private details")
+    factory = Mock(return_value=client)
+    monkeypatch.setattr(sms.httpx, "AsyncClient", factory)
+    with pytest.raises(sms.SMSDeliveryError) as captured:
+        await sms.send_otp("+79991234567", "123456")
+    assert str(captured.value) == ("SMS_PROXY_TIMEOUT" if expected_proxy else "SMS_TIMEOUT")
+    factory.assert_called_once_with(timeout=10, proxy=expected_proxy, trust_env=False)
+    client.post.assert_awaited_once()
+
+
+async def test_invalid_proxy_does_not_send_sms(monkeypatch):
+    monkeypatch.setattr(settings, "smsc_login", "test-login")
+    monkeypatch.setattr(settings, "smsc_password", "test-password")
+    monkeypatch.setattr(settings, "smsc_use_proxy", True)
+    monkeypatch.setattr(settings, "openai_proxy_address", "proxy.example")
+    monkeypatch.setattr(settings, "openai_proxy_port", "invalid")
+    factory = Mock()
+    monkeypatch.setattr(sms.httpx, "AsyncClient", factory)
+    with pytest.raises(sms.SMSDeliveryError, match="SMS_PROXY_CONFIG"):
+        await sms.send_otp("+79991234567", "123456")
+    factory.assert_not_called()

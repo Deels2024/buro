@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     smsc_login: str = ""
     smsc_password: str = ""
     smsc_sender: str = ""
+    smsc_use_proxy: bool = True
     bootstrap_admin_phone: str = "+79990000000"
     log_level: str = "INFO"
     public_api_url: str = "http://localhost:8080/v1"
@@ -162,4 +163,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-
