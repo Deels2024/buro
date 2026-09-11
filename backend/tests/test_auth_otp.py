@@ -99,8 +99,11 @@ class _RedisDeleteRecorder:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure,code", [(RuntimeError("private details"), "SMS_INTERNAL"),
+    (auth.SMSDeliveryError("SMSC_2"), "SMSC_2")])
 async def test_delivery_failure_releases_code_and_resend_cooldown(
     monkeypatch: pytest.MonkeyPatch,
+    failure, code,
 ) -> None:
     async def no_cooldown(_: str) -> int:
         return 0
@@ -112,7 +115,7 @@ async def test_delivery_failure_releases_code_and_resend_cooldown(
         return None
 
     async def fail_send(*_: object, **__: object) -> None:
-        raise RuntimeError("provider unavailable")
+        raise failure
 
     redis = _RedisDeleteRecorder()
     monkeypatch.setattr(auth, "_otp_cooldown_remaining", no_cooldown)
@@ -129,6 +132,8 @@ async def test_delivery_failure_releases_code_and_resend_cooldown(
         )
 
     assert captured.value.status_code == 503
+    assert f"[{code}]" in captured.value.detail
+    assert "private details" not in captured.value.detail
     assert len(redis.deleted) == 2
     assert redis.deleted[0].startswith("otp:")
     assert redis.deleted[1].startswith("otp:phone:cooldown:")

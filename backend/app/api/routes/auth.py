@@ -42,7 +42,7 @@ from app.services.cache import (
     set_json,
     verify_and_consume_otp,
 )
-from app.services.sms import send_otp
+from app.services.sms import SMSDeliveryError, send_otp
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -175,13 +175,14 @@ async def request_code(payload: PhoneCodeRequest, request: Request) -> PhoneCode
             settings.otp_ttl_seconds,
         )
         await send_otp(phone, code)
-    except Exception:
+    except Exception as exc:
         # Do not leave a usable code behind if the user never received the SMS.
         await redis.delete(otp_key, cooldown_key)
-        logger.exception("OTP delivery failed for phone ending in %s", phone[-4:])
+        reason = exc.code if isinstance(exc, SMSDeliveryError) else "SMS_INTERNAL"
+        logger.warning("OTP delivery failed request=%s reason=%s", getattr(request.state, "request_id", "unknown"), reason)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Не удалось отправить SMS. Попробуйте позже",
+            detail=f"Не удалось отправить SMS. Попробуйте позже. [{reason}]",
         ) from None
     return PhoneCodeRequested(
         expires_in=settings.otp_ttl_seconds,
