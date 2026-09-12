@@ -1,0 +1,35 @@
+name: Verify mobile asset delivery
+
+on:
+  push:
+    branches: [codex/verify-mobile-asset-delivery]
+
+permissions: {}
+
+jobs:
+  public-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Download public assets and verify their complete contents
+        shell: python
+        run: |
+          import hashlib, json, time
+          from concurrent.futures import ThreadPoolExecutor
+          from urllib.request import urlopen
+          
+          expected = {"assets/fonts/BureauSans-400.ttf":"41ec4aa0f43b1fd5bc16a57e6e62d4b7cdf4f4e106ab352d9505880055ac222e","assets/fonts/BureauSans-500.ttf":"0fc9f5c16eb7853e51b22e52579e0fab756e750470565a5d8bf151d4f49213ce","assets/fonts/BureauSans-600.ttf":"8b4b3aeb7d808fa4fffd4f89de35c34dd316e309f1f1a1463f09d7af27612a34","assets/fonts/BureauSans-700.ttf":"9196348d93eca3c4860bb2171dbb02c4d756114515ea0aab476d314ca56d639a","assets/illustrations/belongings.webp":"91cf6ea0dc6f93be485145e537eec1437cd968073867686147e4c4d48875ef4f","assets/illustrations/return.webp":"3eae3f66d0778d3b4bf602416831c366d652d557924dc4114cdb8df75c658af7"}
+          def check(item):
+              path, digest = item
+              start = time.monotonic()
+              with urlopen('https://edinburo.ru/app/assets/' + path, timeout=25) as response:
+                  content = response.read(1000000)
+                  result = {'path': path, 'http': response.status, 'bytes': len(content),
+                            'exact': hashlib.sha256(content).hexdigest() == digest,
+                            'seconds': round(time.monotonic() - start, 2)}
+              return result
+          with ThreadPoolExecutor(max_workers=3) as pool:
+              results = list(pool.map(check, expected.items()))
+          for result in results:
+              print(json.dumps(result))
+          assert all(result['http'] == 200 and result['exact'] for result in results)
