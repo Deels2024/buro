@@ -511,7 +511,7 @@ class _HomeViewState extends State<HomeView> {
                     width: 44, height: 44,
                     decoration: BoxDecoration(color: BureauColors.blue,
                       borderRadius: BorderRadius.circular(15)),
-                    child: const Center(child: Text('БН', style: TextStyle(
+                    child: const Center(child: Text('БН', textScaler: TextScaler.noScaling, style: TextStyle(
                       color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700))),
                   ),
                   const SizedBox(width: 12),
@@ -551,7 +551,7 @@ class _HomeViewState extends State<HomeView> {
                 const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Icon(Icons.shield_outlined, color: BureauColors.green, size: 18),
                   SizedBox(width: 8),
-                  Expanded(child: Text('Контакты и точный адрес скрыты от других пользователей.',
+                  Expanded(child: Text('Контакты и точный адрес не публикуются.',
                     style: TextStyle(color: BureauColors.slate, fontSize: 12, height: 1.45))),
                 ]),
                 const SectionTitle('Последние объявления'),

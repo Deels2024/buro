@@ -40,8 +40,10 @@ Future<http.Response> _handle(http.Request request) async {
 Future<AppController> _open(WidgetTester tester, Widget page, {double width=390, double height=844, double scale=1}) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = Size(width,height);
+  tester.view.padding = const FakeViewPadding(top: 44, bottom: 34);
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(tester.view.resetPadding);
   final controller = AppController(api:BureauApiClient(baseUrl:'https://example.invalid/v1',
     tokenStore:_Tokens(), httpClient:MockClient(_handle)))
     ..state = AppSessionState.signedIn
@@ -54,8 +56,8 @@ Future<AppController> _open(WidgetTester tester, Widget page, {double width=390,
   )));
   await tester.runAsync(() async {
     final context = tester.element(find.byType(MaterialApp));
-    await precacheImage(const AssetImage('assets/illustrations/belongings.webp'), context);
-    await precacheImage(const AssetImage('assets/illustrations/return.webp'), context);
+    await precacheImage(const ResizeImage(AssetImage('assets/illustrations/belongings.webp'), width: 512), context);
+    await precacheImage(const ResizeImage(AssetImage('assets/illustrations/return.webp'), width: 512), context);
   });
   await tester.pumpAndSettle();
   addTearDown(() async { await tester.pumpWidget(const SizedBox.shrink()); controller.dispose(); });
@@ -87,6 +89,9 @@ void main() {
       loader.addFont(rootBundle.load('assets/fonts/BureauSans-$weight.ttf'));
     }
     await loader.load();
+    final icons = FontLoader('MaterialIcons')
+      ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+    await icons.load();
   });
 
   testWidgets('home artwork and phone typography preserve search and creation actions', (tester) async {
