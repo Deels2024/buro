@@ -512,26 +512,19 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     children: [
       const BureauPill('3 КОНТРОЛЬНЫХ ВОПРОСА'),
       const SizedBox(height: 18),
-      TextField(
-        controller: _answer1,
-        maxLines: 2,
-        decoration: const InputDecoration(
-          labelText: 'Какого цвета внутренняя часть?',
-        ),
+      BureauField(
+        label: 'Какого цвета внутренняя часть?',
+        child: TextField(controller: _answer1, minLines: 2, maxLines: 5),
       ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: _answer2,
-        maxLines: 2,
-        decoration: const InputDecoration(labelText: 'Что находилось внутри?'),
+      const SizedBox(height: 20),
+      BureauField(
+        label: 'Что находилось внутри?',
+        child: TextField(controller: _answer2, minLines: 2, maxLines: 5),
       ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: _answer3,
-        maxLines: 2,
-        decoration: const InputDecoration(
-          labelText: 'Какая уникальная метка или дефект?',
-        ),
+      const SizedBox(height: 20),
+      BureauField(
+        label: 'Какая уникальная метка или дефект?',
+        child: TextField(controller: _answer3, minLines: 2, maxLines: 5),
       ),
       const SizedBox(height: 14),
       const NoticeCard(
@@ -684,6 +677,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     children: [
       DropdownButtonFormField<String>(
         initialValue: _handoverMethod,
+        isExpanded: true,
         items: const [
           DropdownMenuItem(
             value: 'safe_point',

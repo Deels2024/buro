@@ -371,8 +371,9 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       ),
       const SectionTitle('Категория'),
       DropdownButtonFormField<String>(initialValue: _category.text,
-        decoration: const InputDecoration(labelText: 'Категория'),
-        items: categoryLabels.entries.map((e) => DropdownMenuItem(value:e.key,child:Text(e.value))).toList(),
+        isExpanded: true,
+        decoration: const InputDecoration(),
+        items: categoryLabels.entries.map((e) => DropdownMenuItem(value:e.key,child:Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
         onChanged:(v)=>setState(()=>_category.text=v??'other')),
       const SectionTitle('Описание'),
       TextField(

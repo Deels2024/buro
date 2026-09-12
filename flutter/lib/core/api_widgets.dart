@@ -101,21 +101,29 @@ class _ApiButtonState extends State<ApiButton> {
 
   @override
   Widget build(BuildContext context) {
-    final child = _loading
-        ? const SizedBox.square(
-            dimension: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
-        : Row(
+    final child = Stack(
+      alignment: Alignment.center,
+      children: [
+        Visibility(
+          visible: !_loading,
+          maintainSize: true,
+          maintainAnimation: true,
+          maintainState: true,
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (widget.icon != null) ...[
                 Icon(widget.icon, size: 19),
                 const SizedBox(width: 8),
               ],
-              Text(widget.label),
+              Flexible(child: Text(widget.label, textAlign: TextAlign.center)),
             ],
-          );
+          ),
+        ),
+        if (_loading)
+          const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+      ],
+    );
     if (widget.outlined) {
       return OutlinedButton(onPressed: _loading ? null : _run, child: child);
     }

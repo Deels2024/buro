@@ -447,20 +447,22 @@ class _OrgInventoryPageState extends State<OrgInventoryPage> {
             children: [
               _OrgHeader('Инвентарь', widget.organization),
               const SizedBox(height: 14),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'active', label: Text('Активные')),
-                  ButtonSegment(value: 'draft', label: Text('Черновики')),
-                  ButtonSegment(value: 'closed', label: Text('Закрытые')),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final option in const {
+                    'active': 'Активные', 'draft': 'Черновики', 'closed': 'Закрытые',
+                  }.entries)
+                    ChoiceChip(
+                      label: Text(option.value),
+                      selected: _status == option.key,
+                      onSelected: (selected) => setState(() {
+                        _status = selected ? option.key : null;
+                        _reload();
+                      }),
+                    ),
                 ],
-                selected: _status == null ? <String>{} : {_status!},
-                emptySelectionAllowed: true,
-                onSelectionChanged: (value) {
-                  setState(() {
-                    _status = value.firstOrNull;
-                    _reload();
-                  });
-                },
               ),
             ],
           ),
@@ -620,11 +622,12 @@ class _OrgTeamPageState extends State<OrgTeamPage> {
     final api = AppScope.of(context, listen: false).api;
     final phone = TextEditingController(text: '+7');
     var role = 'operator';
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('Пригласить сотрудника'),
+          scrollable: true,
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -636,6 +639,7 @@ class _OrgTeamPageState extends State<OrgTeamPage> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: role,
+                isExpanded: true,
                 items: const ['manager', 'operator', 'viewer']
                     .map(
                       (item) =>
@@ -944,10 +948,11 @@ class _OrganizationBranchesPageState extends State<OrganizationBranchesPage> {
     final api = AppScope.of(context, listen: false).api;
     final name = TextEditingController();
     final address = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Новый филиал'),
+        scrollable: true,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1069,7 +1074,7 @@ class _OrganizationSettingsPageState extends State<OrganizationSettingsPage> {
   Future<void> _createWebhook() async {
     final api = AppScope.of(context, listen: false).api;
     final url = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Новый вебхук'),

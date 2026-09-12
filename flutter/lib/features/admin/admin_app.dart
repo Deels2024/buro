@@ -231,16 +231,18 @@ class _ModerationQueuePageState extends State<ModerationQueuePage> {
     final reason = TextEditingController(
       text: 'Публикация соответствует правилам',
     );
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text(item['title']?.toString() ?? 'Публикация'),
+          scrollable: true,
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
                 initialValue: decision,
+                isExpanded: true,
                 items: const ['approve', 'reject', 'block', 'request_changes']
                     .map(
                       (value) =>
@@ -350,16 +352,18 @@ class _RiskAndDisputesPageState extends State<RiskAndDisputesPage> {
     final reason = TextEditingController(
       text: 'Требуется дополнительная проверка доказательств',
     );
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('Решение по спору'),
+          scrollable: true,
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
                 initialValue: decision,
+                isExpanded: true,
                 items: const ['approve', 'reject', 'request_changes']
                     .map(
                       (value) =>
@@ -669,7 +673,7 @@ class _AdsAdminPageState extends State<AdsAdminPage> {
     final body = TextEditingController();
     final url = TextEditingController(text: 'https://example.com');
     final erid = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Новая кампания'),
