@@ -195,6 +195,11 @@ class ListingOut(APIModel):
     updated_at: datetime
 
 
+class ManagedListingOut(ListingOut):
+    # Only management endpoints may expose the decrypted location.
+    location: LocationInput | None = None
+
+
 class ListingPage(APIModel):
     items: list[ListingOut]
     total: int

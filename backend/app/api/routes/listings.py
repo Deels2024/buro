@@ -3,7 +3,7 @@ import base64
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +18,7 @@ from app.schemas import (
     ListingOut,
     ListingPage,
     ListingUpdate,
+    ManagedListingOut,
     MatchDecision,
     MatchOut,
     PhotoSearchOut,
@@ -26,7 +27,7 @@ from app.services.ai import ai_service
 from app.services.cache import enqueue, rate_limit
 from app.services.categories import category_values
 from app.services.matching import normalized_factors
-from app.services.serializers import listing_out
+from app.services.serializers import listing_out, managed_listing_out
 from app.services.storage import storage
 from app.services.traffic import record_event
 from app.services.webhooks import create_deliveries, enqueue_deliveries
@@ -193,15 +194,16 @@ async def _assert_manage(db: DB, user: CurrentUser, listing: Listing) -> None:
         raise HTTPException(status_code=403, detail="Нет доступа к публикации")
 
 
-@router.get("/{listing_id}/manage", response_model=ListingOut)
-async def managed_listing(listing_id: UUID, db: DB, user: CurrentUser) -> ListingOut:
+@router.get("/{listing_id}/manage", response_model=ManagedListingOut)
+async def managed_listing(listing_id: UUID, db: DB, user: CurrentUser, response: Response) -> ManagedListingOut:
     listing = await _get_listing(db, listing_id)
     await _assert_manage(db, user, listing)
-    return listing_out(listing, private=True)
+    response.headers["Cache-Control"] = "no-store"
+    return managed_listing_out(listing)
 
 
-@router.patch("/{listing_id}", response_model=ListingOut)
-async def update_listing(payload: ListingUpdate, listing_id: UUID, db: DB, user: CurrentUser) -> ListingOut:
+@router.patch("/{listing_id}", response_model=ManagedListingOut)
+async def update_listing(payload: ListingUpdate, listing_id: UUID, db: DB, user: CurrentUser, response: Response) -> ManagedListingOut:
     listing = await _get_listing(db, listing_id)
     await _assert_manage(db, user, listing)
     if listing.status in {"closed", "blocked"} and user.role not in {"admin", "moderator"}:
@@ -253,7 +255,8 @@ async def update_listing(payload: ListingUpdate, listing_id: UUID, db: DB, user:
     await enqueue_deliveries(delivery_ids)
     # Refresh the collection after reassigning photo foreign keys.
     await db.refresh(listing, attribute_names=["media"])
-    return listing_out(listing, private=True)
+    response.headers["Cache-Control"] = "no-store"
+    return managed_listing_out(listing)
 
 
 @router.post("/ai/describe", response_model=AIItemDescription)

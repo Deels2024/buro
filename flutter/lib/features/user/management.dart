@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import '../../core/api_widgets.dart';
+import '../../core/location_editor.dart';
 import '../../core/production_widgets.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -15,12 +17,15 @@ class EditListingPage extends StatefulWidget {
   State<EditListingPage> createState() => _EditListingPageState();
 }
 class _EditListingPageState extends State<EditListingPage> {
-  final _title = TextEditingController(), _description = TextEditingController(), _region = TextEditingController(), _storage = TextEditingController();
+  final _title = TextEditingController(), _description = TextEditingController(), _region = TextEditingController(),
+      _address = TextEditingController(), _storage = TextEditingController();
   String _category = 'other';
   JsonMap? _listing;
   Object? _error;
   List<JsonMap> _media = [];
   bool _started = false, _uploading = false;
+  bool _locationChanged = false, _resolvingLocation = false, _saving = false;
+  LatLng? _point;
   BureauApiClient get api => AppScope.of(context, listen: false).api;
   @override
   void didChangeDependencies() { super.didChangeDependencies(); if (!_started) { _started = true; _load(); } }
@@ -30,6 +35,11 @@ class _EditListingPageState extends State<EditListingPage> {
       if (!mounted) return;
       _title.text = item['title'].toString(); _description.text = item['description'].toString();
       _region.text = item['public_region'].toString(); _storage.text = item['storage_code']?.toString() ?? '';
+      final location = item['location'] as Map?;
+      _address.text = location?['exact_address']?.toString() ?? '';
+      final latitude = location?['latitude'], longitude = location?['longitude'];
+      _point = latitude is num && longitude is num ? LatLng(latitude.toDouble(), longitude.toDouble()) : null;
+      _locationChanged = false;
       _category = categoryLabels.containsKey(item['category']) ? item['category'].toString() : 'other';
       setState(() { _listing = item; _media = (item['media'] as List).map((m) => Map<String, dynamic>.from(m as Map)).toList(); _error = null; });
     } catch (e) { if (mounted) setState(() => _error = e); }
@@ -48,20 +58,35 @@ class _EditListingPageState extends State<EditListingPage> {
     finally { if (mounted) setState(() => _uploading = false); }
   }
   Future<void> _save(String status) async {
+    if (_saving) return;
     if (_uploading) throw BureauApiException(409, 'Дождитесь загрузки фотографий');
+    if (_resolvingLocation) throw BureauApiException(409, 'Дождитесь определения адреса');
+    if (_region.text.trim().length < 2) throw BureauApiException(422, 'Укажите город или населённый пункт');
     final body = <String,dynamic>{'title':_title.text.trim(), 'description':_description.text.trim(), 'category':_category, 'storage_code':_storage.text.trim(), 'media_ids':_media.map((m)=>m['id']).toList(), 'status':status};
-    if (_region.text.trim() != _listing!['public_region']) body['location'] = {'region':_region.text.trim()};
-    final updated = await api.updateListing(widget.listingId, body);
-    if (!mounted) return;
-    setState(() => _listing = updated);
-    showApiSuccess(context, status == 'active' ? 'Сохранено и отправлено на модерацию' : 'Черновик сохранён');
+    if (_locationChanged) {
+      body['location'] = {
+        'region': _region.text.trim(),
+        'latitude': _point?.latitude,
+        'longitude': _point?.longitude,
+        'exact_address': _address.text.trim().isEmpty ? null : _address.text.trim(),
+      };
+    }
+    setState(() => _saving = true);
+    try {
+      final updated = await api.updateListing(widget.listingId, body);
+      if (!mounted) return;
+      setState(() { _listing = updated; _locationChanged = false; });
+      showApiSuccess(context, status == 'active' ? 'Сохранено и отправлено на модерацию' : 'Черновик сохранён');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
   @override
-  void dispose() { for (final c in [_title,_description,_region,_storage]) { c.dispose(); } super.dispose(); }
+  void dispose() { for (final c in [_title,_description,_region,_address,_storage]) { c.dispose(); } super.dispose(); }
   @override
   Widget build(BuildContext context) => BureauPage(
     title: 'Моя публикация',
-    child: _error != null
+    child: AbsorbPointer(absorbing: _saving, child: _error != null
         ? Column(children: [
             NoticeCard(apiErrorText(_error!)),
             TextButton(onPressed: _load, child: const Text('Повторить')),
@@ -133,28 +158,27 @@ class _EditListingPageState extends State<EditListingPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    BureauField(
-                      label: 'Город или район',
-                      child: TextField(
-                        controller: _region,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(hintText: 'Например, Санкт-Петербург'),
-                      ),
+                    Text(_listing!['kind'] == 'lost' ? 'Место пропажи' : 'Место хранения',
+                      style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 12),
+                    LocationEditor(
+                      region: _region, address: _address, selected: _point,
+                      onPoint: (point) => setState(() { _point = point; _locationChanged = true; }),
+                      onResolvingChanged: (value) => setState(() => _resolvingLocation = value),
                     ),
-                    const SizedBox(height: 20),
-                    BureauField(
-                      label: 'Место хранения',
-                      child: TextField(
-                        controller: _storage,
-                        minLines: 1,
-                        maxLines: 3,
-                        decoration: const InputDecoration(
-                          hintText: 'Адрес или ориентир',
-                          helperText: 'Видно только вам и сотрудникам',
-                          helperMaxLines: 3,
+                    const SizedBox(height: 12),
+                    const Text('Точный адрес виден только вам и сотрудникам. Публичная точка округляется.'),
+                    if (_listing!['organization_id'] != null || _storage.text.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      BureauField(
+                        label: 'Код ячейки хранения',
+                        child: TextField(
+                          controller: _storage,
+                          maxLength: 80,
+                          decoration: const InputDecoration(hintText: 'Номер ячейки или внутренний код'),
                         ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 28),
                     if (!['closed', 'blocked'].contains(_listing!['status'])) ...[
                       ApiButton(label: 'Сохранить черновик', outlined: true, onPressed: () => _save('draft')),
@@ -172,7 +196,7 @@ class _EditListingPageState extends State<EditListingPage> {
                     const NoticeCard('Изменения опубликованной карточки проходят повторную проверку. Находке нужна фотография; пропажу можно описать без неё.'),
                   ],
                 ),
-              ),
+              )),
   );
 }
 

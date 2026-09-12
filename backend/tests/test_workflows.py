@@ -2,7 +2,7 @@
 import asyncio
 import os
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fakeredis.aioredis import FakeRedis
@@ -10,9 +10,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.core.security import create_access_token, encrypt_json
+from app.core.security import create_access_token, decrypt_json, encrypt_json
 from app.db.base import Base
-from app.db.models import Handover, MediaObject, Organization, OrganizationMember, User
+from app.db.models import Handover, Listing, MediaObject, Organization, OrganizationMember, User
 from app.db.session import get_db
 from app.main import app
 from app.services import cache, traffic
@@ -170,3 +170,67 @@ async def test_viewer_cannot_inspect_or_decide_claim(workflow):
     cid=(await client.post('/v1/claims',json={'listing_id':lid},headers=h('claimant'))).json()['id']
     assert (await client.get(f'/v1/claims/{cid}/review',headers=h('viewer'))).status_code==403
     assert (await client.post(f'/v1/claims/{cid}/decision',json={'decision':'approved','reason':'Я наблюдатель'},headers=h('viewer'))).status_code==403
+
+
+async def test_managed_location_round_trip_is_private_and_preserved_on_other_edits(workflow):
+    client, sessions, users, h = workflow
+    original = {'region': 'Москва', 'latitude': 55.753219, 'longitude': 37.615782,
+                'exact_address': 'PRIVATE-ADDRESS-104'}
+    created = await client.post('/v1/listings', headers=h('holder'),
+                                json=listing_body(kind='lost', publish=True, location=original))
+    assert created.status_code == 201, created.text
+    lid = created.json()['id']
+    managed = await client.get(f'/v1/listings/{lid}/manage', headers=h('holder'))
+    assert managed.json()['location'] == original
+    assert managed.headers['cache-control'] == 'no-store'
+    assert (await client.get(f'/v1/listings/{lid}/manage', headers=h('stranger'))).status_code == 403
+    assert (await client.patch(f'/v1/listings/{lid}', headers=h('stranger'),
+                               json={'location': original})).status_code == 403
+    unchanged = await client.patch(f'/v1/listings/{lid}', headers=h('holder'),
+                                   json={'title': 'Обновлённое название рюкзака'})
+    assert unchanged.json()['location'] == original
+    replacement = {**original, 'latitude': 55.769321, 'longitude': 37.608912,
+                   'exact_address': 'PRIVATE-ADDRESS-205'}
+    updated = await client.patch(f'/v1/listings/{lid}', headers=h('holder'), json={'location': replacement})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['location'] == replacement
+    assert updated.headers['cache-control'] == 'no-store'
+    assert updated.json()['storage_code'] == 'PRIVATE-104'
+    assert updated.json()['moderation_status'] == 'pending'
+    reopened = await client.get(f'/v1/listings/{lid}/manage', headers=h('holder'))
+    assert reopened.json()['location'] == replacement
+    async with sessions() as db:
+        listing = await db.get(Listing, UUID(lid))
+        assert replacement['exact_address'] not in listing.exact_location_cipher
+        assert decrypt_json(listing.exact_location_cipher) == replacement
+    approved = await client.post(f'/v1/admin/moderation/listings/{lid}', headers=h('admin'),
+                                 json={'decision': 'approve', 'reason': 'Адрес проверен'})
+    assert approved.status_code == 200, approved.text
+    public = (await client.get(f'/v1/listings/{lid}')).json()
+    assert 'location' not in public and 'exact_address' not in public
+    assert public['approx_latitude'] == round(replacement['latitude'], 2)
+    assert public['approx_longitude'] == round(replacement['longitude'], 2)
+    for url in (f'/v1/listings/{lid}', '/v1/listings', f'/items/{lid}/'):
+        response = await client.get(url)
+        assert response.status_code == 200
+        assert 'PRIVATE-ADDRESS' not in response.text
+
+
+async def test_manual_location_clears_old_coordinates_and_legacy_location_stays_absent(workflow):
+    client, sessions, users, h = workflow
+    created = await client.post('/v1/listings', headers=h('holder'), json=listing_body(kind='lost'))
+    lid = created.json()['id']
+    manual = {'region': 'Санкт-Петербург', 'latitude': None, 'longitude': None, 'exact_address': None}
+    updated = await client.patch(f'/v1/listings/{lid}', headers=h('holder'), json={'location': manual})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['location'] == manual
+    assert updated.json()['approx_latitude'] is None and updated.json()['approx_longitude'] is None
+    async with sessions() as db:
+        listing = await db.get(Listing, UUID(lid))
+        listing.exact_location_cipher = None
+        await db.commit()
+    legacy = await client.get(f'/v1/listings/{lid}/manage', headers=h('holder'))
+    assert legacy.json()['location'] is None
+    renamed = await client.patch(f'/v1/listings/{lid}', headers=h('holder'),
+                                 json={'title': 'Рюкзак после переименования'})
+    assert renamed.json()['location'] is None
