@@ -56,7 +56,12 @@ class BureauPage extends StatelessWidget {
                   color: Colors.white,
                   border: Border(top: BorderSide(color: BureauColors.line)),
                 ),
-                child: bottom,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 820),
+                    child: SizedBox(width: double.infinity, child: bottom),
+                  ),
+                ),
               ),
           ],
         ),
@@ -85,6 +90,23 @@ class SectionTitle extends StatelessWidget {
       ),
     );
   }
+}
+
+class BureauField extends StatelessWidget {
+  const BureauField({super.key, required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(label, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+      const SizedBox(height: 8),
+      Semantics(label: label, child: child),
+    ],
+  );
 }
 
 class BureauPill extends StatelessWidget {
@@ -116,12 +138,14 @@ class BureauPill extends StatelessWidget {
             Icon(icon, size: 13, color: color),
             const SizedBox(width: 5),
           ],
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],

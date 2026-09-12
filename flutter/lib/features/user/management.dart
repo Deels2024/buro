@@ -96,7 +96,7 @@ class _EditListingPageState extends State<EditListingPage> {
                       label: Text(_uploading ? 'Загружаем…' : 'Добавить фотографии'),
                     ),
                     const SizedBox(height: 28),
-                    _ListingEditorField(
+                    BureauField(
                       label: 'Название',
                       child: TextField(
                         controller: _title,
@@ -108,7 +108,7 @@ class _EditListingPageState extends State<EditListingPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    _ListingEditorField(
+                    BureauField(
                       label: 'Описание без личных данных',
                       child: TextField(
                         controller: _description,
@@ -119,7 +119,7 @@ class _EditListingPageState extends State<EditListingPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    _ListingEditorField(
+                    BureauField(
                       label: 'Категория',
                       child: DropdownButtonFormField<String>(
                         initialValue: _category,
@@ -133,7 +133,7 @@ class _EditListingPageState extends State<EditListingPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    _ListingEditorField(
+                    BureauField(
                       label: 'Город или район',
                       child: TextField(
                         controller: _region,
@@ -142,7 +142,7 @@ class _EditListingPageState extends State<EditListingPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    _ListingEditorField(
+                    BureauField(
                       label: 'Место хранения',
                       child: TextField(
                         controller: _storage,
@@ -173,22 +173,6 @@ class _EditListingPageState extends State<EditListingPage> {
                   ],
                 ),
               ),
-  );
-}
-
-class _ListingEditorField extends StatelessWidget {
-  const _ListingEditorField({required this.label, required this.child});
-  final String label;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(label, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-      const SizedBox(height: 8),
-      Semantics(label: label, child: child),
-    ],
   );
 }
 
@@ -280,33 +264,50 @@ class _ClaimReviewPageState extends State<ClaimReviewPage> {
     final data=snapshot.data!, claim=Map<String,dynamic>.from(data['claim'] as Map), listing=Map<String,dynamic>.from(data['listing'] as Map);
     final answers=Map<String,dynamic>.from(data['answers'] as Map);
     return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Text(listing['title'].toString(),style:Theme.of(context).textTheme.headlineSmall),Text(stateLabel(claim['status'])),
+      Text(listing['title'].toString(),style:Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 8),
+      Text(stateLabel(claim['status'])),
+      const SizedBox(height: 16),
       PhotoGallery(media:(listing['media'] as List).map((m)=>Map<String,dynamic>.from(m as Map)).toList()),
       const SectionTitle('Скрытые признаки находки'),Text((data['hidden_features'] as List).join(', ').isEmpty?'Не указаны':(data['hidden_features'] as List).join(', ')),
       const SectionTitle('Ответы заявителя'),for(final e in answers.entries)Padding(padding:const EdgeInsets.only(bottom:12),child:Text('${e.key}\n${e.value}')),
       const SectionTitle('Доказательства'),
       if((data['evidence'] as List).isEmpty)const NoticeCard('Медиа-доказательства не приложены. Оцените ответы и при необходимости запросите уточнение.'),
       for(final raw in data['evidence'] as List) ...[
-        Text('${raw['evidence_type']} · ${stateLabel(raw['status'])}'),Text(raw['note']?.toString()??''),
+        Text('${raw['evidence_type']} · ${stateLabel(raw['status'])}'),
+        if ((raw['note']?.toString() ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(raw['note'].toString()),
+        ],
+        const SizedBox(height: 12),
         if(raw['media'] is Map)PhotoGallery(media:[Map<String,dynamic>.from(raw['media'] as Map)]),const SizedBox(height:12),
       ],
+      const SizedBox(height: 16),
       const NoticeCard('Автоматическая оценка риска — подсказка. Сравните реальные признаки и доказательства перед решением.'),
       if(['under_review','needs_more_info'].contains(claim['status'])) ...[
-        TextField(controller:_reason,minLines:2,maxLines:5,decoration:const InputDecoration(labelText:'Причина решения или вопрос заявителю')),
+        const SizedBox(height: 20),
+        BureauField(label: 'Причина решения или вопрос заявителю',
+          child: TextField(controller:_reason,minLines:2,maxLines:5)),
         const SizedBox(height:12),ApiButton(label:'Подтвердить владельца',onPressed:()=>_decide('approved')),
         const SizedBox(height:8),ApiButton(label:'Запросить уточнение',outlined:true,onPressed:()=>_decide('needs_more_info')),
         const SizedBox(height:8),ApiButton(label:'Отклонить заявление',outlined:true,onPressed:()=>_decide('rejected')),
       ],
+      const SizedBox(height: 12),
       TextButton.icon(onPressed:()=>pushPage(context,Scaffold(appBar:AppBar(title:const Text('Чат по заявлению')),body:Padding(padding:const EdgeInsets.all(16),child:ClaimChat(claimId:widget.claimId)))),icon:const Icon(Icons.chat_outlined),label:const Text('Открыть чат')),
       if(claim['status']=='approved') ...[
         const SectionTitle('Передача вещи'),
-        if (_contact?['unlocked'] == true) SelectableText('Телефон владельца: ${_contact?['claimant_phone'] ?? ''}'),
+        if (_contact?['unlocked'] == true) ...[
+          SelectableText('Телефон владельца: ${_contact?['claimant_phone'] ?? ''}'),
+          const SizedBox(height: 16),
+        ],
         ApiButton(label:'Разрешить обмен телефонами',outlined:true,onPressed:()async{final c=await api.setContactConsent(widget.claimId,true);if(context.mounted){setState(()=>_contact=c);showApiSuccess(context,c['unlocked']==true?'Телефон владельца открыт':'Ваше согласие сохранено. Ожидаем владельца.');}}),
+        const SizedBox(height: 12),
         TextButton.icon(onPressed:()async{final code=await Navigator.push<String>(context,MaterialPageRoute(builder:(_)=>const ScanHandoverPage()));if(code!=null&&mounted)setState(()=>_token.text=code);},icon:const Icon(Icons.qr_code_scanner),label:const Text('Сканировать QR владельца')),
-        TextField(controller:_token,decoration:const InputDecoration(labelText:'Код передачи')),const SizedBox(height:12),
+        const SizedBox(height: 20),
+        BureauField(label: 'Код передачи', child: TextField(controller:_token)),
+        const SizedBox(height: 20),
         ApiButton(label:'Подтвердить передачу владельцу',onPressed:()async{_handover=await api.scanHandover(_token.text.trim(),claimId:widget.claimId);if(context.mounted){showApiSuccess(context,_handover!['completed_at']!=null?'Возврат завершён':'Вы подтвердили передачу. Ожидаем владельца.');_refresh();}}),
       ],
     ]);
   }));
 }
-

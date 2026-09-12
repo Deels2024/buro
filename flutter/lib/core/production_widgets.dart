@@ -31,22 +31,88 @@ int matchPercent(dynamic value) {
 class PhotoGallery extends StatelessWidget {
   const PhotoGallery({super.key, required this.media});
   final List<JsonMap> media;
+
   @override
-  Widget build(BuildContext context) => Wrap(spacing: 12, runSpacing: 12, children: [
-    for (final item in media)
-      SizedBox(width: 220, child: Column(children: [
-        if (item['download_url'] != null && item['mime_type'].toString().startsWith('image/'))
-          InkWell(onTap: () => showDialog<void>(context: context, builder: (_) => Dialog(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Align(alignment: Alignment.topRight, child: IconButton(tooltip: 'Закрыть фото', icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))),
-              Flexible(child: InteractiveViewer(child: Image.network(item['download_url'].toString(), fit: BoxFit.contain))),
-            ]),
-          )), child: Image.network(item['download_url'].toString(), height: 160, width: 220, fit: BoxFit.cover,
-            errorBuilder: (_, error, stack) => const SizedBox(height: 160, child: Center(child: Text('Не удалось загрузить фото')))))
-        else const Icon(Icons.insert_drive_file_outlined),
-        if (item['status'] != 'ready') Text(stateLabel(item['status'])),
-      ])),
-  ]);
+  Widget build(BuildContext context) {
+    if (media.isEmpty) return const SizedBox.shrink();
+    return LayoutBuilder(builder: (context, constraints) {
+      final columns = ((constraints.maxWidth + 12) / 292).floor().clamp(1, 3);
+      final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
+      return Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          for (var index = 0; index < media.length; index++)
+            SizedBox(
+              width: width,
+              child: _GalleryPhoto(item: media[index], number: index + 1),
+            ),
+        ],
+      );
+    });
+  }
+}
+
+class _GalleryPhoto extends StatelessWidget {
+  const _GalleryPhoto({required this.item, required this.number});
+  final JsonMap item;
+  final int number;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = item['download_url']?.toString();
+    final isImage = url != null && item['mime_type'].toString().startsWith('image/');
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 10,
+            child: isImage
+                ? InkWell(
+                    onTap: () => showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => Dialog(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Align(
+                              alignment: Alignment.topRight,
+                              child: IconButton(
+                                tooltip: 'Закрыть фото',
+                                icon: const Icon(Icons.close),
+                                onPressed: () => Navigator.pop(dialogContext),
+                              ),
+                            ),
+                            Flexible(
+                              child: InteractiveViewer(
+                                child: Image.network(url, fit: BoxFit.contain,
+                                  errorBuilder: (_, error, stack) => const Center(child: Text('Не удалось загрузить фото'))),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    child: Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      semanticLabel: 'Фото $number',
+                      errorBuilder: (_, error, stack) => const Center(child: Text('Не удалось загрузить фото')),
+                    ),
+                  )
+                : const Center(child: Icon(Icons.insert_drive_file_outlined, size: 40)),
+          ),
+          if (item['status'] != null && item['status'] != 'ready')
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(stateLabel(item['status'])),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class ListingMap extends StatelessWidget {

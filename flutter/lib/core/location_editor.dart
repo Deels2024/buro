@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import '../data/app_controller.dart';
 import '../data/bureau_api_client.dart';
 import 'production_widgets.dart';
+import 'widgets.dart';
 
 class MapsTextField extends StatefulWidget {
   const MapsTextField({super.key, required this.controller, required this.label,
@@ -84,10 +85,11 @@ class _MapsTextFieldState extends State<MapsTextField> {
   void dispose() { ++_version; _timer?.cancel(); widget.controller.removeListener(_controllerChanged); super.dispose(); }
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    TextField(controller: widget.controller, onChanged: _changed,
-      decoration: InputDecoration(labelText: widget.label,
+    BureauField(label: widget.label, child: TextField(controller: widget.controller, onChanged: _changed,
+      minLines: 1, maxLines: 3,
+      decoration: InputDecoration(
         prefixIcon: Icon(widget.cityOnly ? Icons.location_city_outlined : Icons.location_on_outlined),
-        suffixIcon: _loading ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))) : null)),
+        suffixIcon: _loading ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))) : null))),
     if (_error != null) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Text(_error!, style: const TextStyle(fontSize: 13))),
     for (final suggestion in _suggestions) ListTile(dense: true,
       title: Text(suggestion['title'].toString()), subtitle: Text(suggestion['subtitle']?.toString() ?? ''),
@@ -148,10 +150,10 @@ class _LocationEditorState extends State<LocationEditor> {
     MapsTextField(controller: widget.region, label: 'Город или населённый пункт', cityOnly: true,
       onEdited: () { widget.address.clear(); _edited(); },
       onSelected: (s) => _resolve(suggestion: s, cityOnly: true)),
-    const SizedBox(height: 12),
+    const SizedBox(height: 20),
     MapsTextField(controller: widget.address, label: 'Адрес или ориентир (скрыт от других)',
       prefix: () => widget.region.text, onEdited: _edited, onSelected: (s) => _resolve(suggestion: s)),
-    const SizedBox(height: 12),
+    const SizedBox(height: 20),
     ListingMap(listings: const [], selected: widget.selected, onPick: (p) => _resolve(point: p)),
     if (_resolving) const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: LinearProgressIndicator()),
     if (_message != null) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(_message!)),

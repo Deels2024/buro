@@ -909,63 +909,62 @@ class CreateEntryView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SafeArea(
-    child: Padding(
+    child: SingleChildScrollView(
       padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Новая публикация',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Что произошло с вещью?',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyLarge?.copyWith(color: BureauColors.slate),
-          ),
-          const SizedBox(height: 28),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: _ChoiceCard(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 820),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Новая публикация', style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 8),
+              Text('Что произошло с вещью?',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: BureauColors.slate)),
+              const SizedBox(height: 28),
+              LayoutBuilder(builder: (context, constraints) {
+                final cards = [
+                  _ChoiceCard(
                     icon: Icons.search_off_rounded,
                     title: 'Я потерял',
-                    text:
-                        'Расскажите, где и когда видели вещь в последний раз.',
+                    text: 'Расскажите, где и когда видели вещь в последний раз.',
                     color: BureauColors.blue,
                     soft: BureauColors.blueSoft,
-                    onTap: () => pushPage(
-                      context,
-                      const CreateFlowPage(initialFound: false),
-                    ),
+                    onTap: () => pushPage(context, const CreateFlowPage(initialFound: false)),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _ChoiceCard(
+                  _ChoiceCard(
                     icon: Icons.volunteer_activism_rounded,
                     title: 'Я нашёл',
-                    text:
-                        'Скройте важные детали — по ним мы проверим владельца.',
+                    text: 'Скройте важные детали — по ним мы проверим владельца.',
                     color: BureauColors.green,
                     soft: BureauColors.greenSoft,
-                    onTap: () => pushPage(
-                      context,
-                      const CreateFlowPage(initialFound: true),
-                    ),
+                    onTap: () => pushPage(context, const CreateFlowPage(initialFound: true)),
                   ),
-                ),
-              ],
-            ),
+                ];
+                final stacked = constraints.maxWidth < 600 ||
+                    MediaQuery.textScalerOf(context).scale(14) > 20;
+                if (stacked) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [cards[0], const SizedBox(height: 16), cards[1]],
+                  );
+                }
+                return IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: cards[0]),
+                      const SizedBox(width: 16),
+                      Expanded(child: cards[1]),
+                    ],
+                  ),
+                );
+              }),
+              const SizedBox(height: 20),
+              const NoticeCard('Публикация бесплатна. Контакты и точное место защищены.'),
+            ],
           ),
-          const SizedBox(height: 18),
-          const NoticeCard(
-            'Публикация бесплатна. Контакты и точное место защищены.',
-          ),
-        ],
+        ),
       ),
     ),
   );
@@ -996,7 +995,7 @@ class _ChoiceCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         IconTile(icon: icon, color: color, background: Colors.white, size: 60),
-        const Spacer(),
+        const SizedBox(height: 24),
         Text(
           title,
           style: Theme.of(context).textTheme.titleLarge?.copyWith(color: color),
@@ -1004,7 +1003,7 @@ class _ChoiceCard extends StatelessWidget {
         const SizedBox(height: 10),
         Text(
           text,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 11),
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 18),
         Icon(Icons.arrow_forward_rounded, color: color),
@@ -1075,7 +1074,10 @@ class _CasesViewState extends State<CasesView> {
               TextButton.icon(onPressed: () => setState(() { final api=AppScope.of(context,listen:false).api; _future=Future.wait([api.myListings(),api.myClaims(),api.supportTickets(),api.incomingClaims()]); }), icon: const Icon(Icons.refresh), label: const Text('Обновить')),
               const SectionTitle('Заявки на мои находки'),
               if(incoming.isEmpty) const NoticeCard('Входящих заявок пока нет.'),
-              for(final claim in incoming) SettingRow(icon:Icons.fact_check_outlined, title:claim['listing_title'].toString(), subtitle:stateLabel(claim['status']), onTap:()=>pushPage(context,ClaimReviewPage(claimId:claim['id'].toString()))),
+              for(final claim in incoming) ...[
+                SettingRow(icon:Icons.fact_check_outlined, title:claim['listing_title'].toString(), subtitle:stateLabel(claim['status']), onTap:()=>pushPage(context,ClaimReviewPage(claimId:claim['id'].toString()))),
+                const SizedBox(height: 10),
+              ],
               const SectionTitle('Мои публикации'),
               for (final listing in listings) ...[
                 SettingRow(
@@ -1343,14 +1345,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _ListingArtwork(
-                      listing: listing!,
-                      color: accent,
-                      background: soft,
-                      height: 300,
-                    ),
-                    const SizedBox(height: 14),
-                    PhotoGallery(media: (listing['media'] as List? ?? []).map((m)=>Map<String,dynamic>.from(m as Map)).toList()),
+                    if ((listing!['media'] as List? ?? []).isEmpty)
+                      _ListingArtwork(
+                        listing: listing,
+                        color: accent,
+                        background: soft,
+                        height: 300,
+                      )
+                    else
+                      PhotoGallery(media: (listing['media'] as List).map((m)=>Map<String,dynamic>.from(m as Map)).toList()),
+                    const SizedBox(height: 16),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -1537,6 +1541,7 @@ class _SearchFiltersPageState extends State<SearchFiltersPage> {
         const SectionTitle('Категория'),
         DropdownButtonFormField<String>(
           initialValue: _category,
+          isExpanded: true,
           items: [const DropdownMenuItem<String>(value: '', child: Text('Все категории')), ...categoryLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))],
           onChanged: (value) => setState(() => _category = value == '' ? null : value),
           decoration: const InputDecoration(hintText: 'Любая категория'),
@@ -1546,6 +1551,7 @@ class _SearchFiltersPageState extends State<SearchFiltersPage> {
         const SectionTitle('Период'),
         DropdownButtonFormField<int>(
           initialValue: _days,
+          isExpanded: true,
           items: const [7, 30, 90, 365]
               .map(
                 (days) =>

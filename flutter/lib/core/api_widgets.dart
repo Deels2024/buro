@@ -113,7 +113,7 @@ class _ApiButtonState extends State<ApiButton> {
                 Icon(widget.icon, size: 19),
                 const SizedBox(width: 8),
               ],
-              Text(widget.label),
+              Flexible(child: Text(widget.label, textAlign: TextAlign.center)),
             ],
           );
     if (widget.outlined) {
