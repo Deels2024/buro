@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DB, AdminUser
+from app.api.deps import DB, AdminUser, ModeratorUser
 from app.core.config import settings
 from app.db.models import AdCampaign, AdEvent, Claim, Listing, ModerationCase, Organization
 from app.schemas import AdCampaignCreate, AdCampaignOut, ModerationDecision
@@ -35,7 +35,7 @@ async def operations(_: AdminUser) -> dict:
 
 
 @router.get("/dashboard")
-async def dashboard(db: DB, _: AdminUser) -> dict[str, int]:
+async def dashboard(db: DB, _: ModeratorUser) -> dict[str, int]:
     open_cases = await db.scalar(select(func.count(ModerationCase.id)).where(ModerationCase.status == "open"))
     risky_claims = await db.scalar(select(func.count(Claim.id)).where(Claim.risk_score >= 0.6))
     pending_orgs = await db.scalar(select(func.count(Organization.id)).where(Organization.status == "pending"))
@@ -53,7 +53,7 @@ async def dashboard(db: DB, _: AdminUser) -> dict[str, int]:
 @router.get("/moderation/listings")
 async def listing_queue(
     db: DB,
-    _: AdminUser,
+    _: ModeratorUser,
     limit: int = Query(default=50, ge=1, le=100),
 ) -> list[dict]:
     listings = await db.scalars(
@@ -71,7 +71,7 @@ async def moderate_listing(
     payload: ModerationDecision,
     listing_id: UUID,
     db: DB,
-    admin: AdminUser,
+    admin: ModeratorUser,
 ) -> dict[str, str]:
     listing = await db.scalar(select(Listing).where(Listing.id == listing_id).options(selectinload(Listing.media)).with_for_update())
     if not listing:
@@ -112,7 +112,7 @@ async def moderate_listing(
 
 
 @router.get("/claims/risk")
-async def risky_claims(db: DB, _: AdminUser, limit: int = 50) -> list[dict]:
+async def risky_claims(db: DB, _: ModeratorUser, limit: int = 50) -> list[dict]:
     claims = await db.scalars(
         select(Claim).where(Claim.risk_score >= 0.4).order_by(Claim.risk_score.desc()).limit(min(limit, 100))
     )
@@ -129,7 +129,7 @@ async def risky_claims(db: DB, _: AdminUser, limit: int = 50) -> list[dict]:
 
 
 @router.get("/disputes")
-async def disputes(db: DB, _: AdminUser, limit: int = 50) -> list[dict]:
+async def disputes(db: DB, _: ModeratorUser, limit: int = 50) -> list[dict]:
     cases = await db.scalars(
         select(ModerationCase)
         .where(ModerationCase.entity_type == "claim", ModerationCase.status == "open")
@@ -153,7 +153,7 @@ async def resolve_dispute(
     payload: ModerationDecision,
     case_id: UUID,
     db: DB,
-    admin: AdminUser,
+    admin: ModeratorUser,
 ) -> dict[str, str]:
     case = await db.get(ModerationCase, case_id)
     if not case or case.entity_type != "claim" or case.status != "open":
@@ -293,3 +293,4 @@ async def ad_stats(campaign_id: UUID, db: DB, _: AdminUser) -> dict:
         "clicks": clicks,
         "ctr": round(clicks / impressions * 100, 2) if impressions else 0,
     }
+

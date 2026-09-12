@@ -22,6 +22,8 @@ GITHUB_WORKFLOW_REF = (
 )
 YANDEX_DIAGNOSTICS_AUDIENCE = "https://edinburo.ru/v1/internal/deployment/yandex-diagnostics"
 YANDEX_DIAGNOSTICS_WORKFLOW_REF = "Deels2024/buro/.github/workflows/deploy.yml@refs/heads/main"
+ADMIN_CONFIGURATION_AUDIENCE = "https://edinburo.ru/v1/internal/deployment/administrator"
+ADMIN_CONFIGURATION_WORKFLOW_REF = "Deels2024/buro/.github/workflows/configure-admin.yml@refs/heads/main"
 
 _jwks_client = PyJWKClient(
     GITHUB_OIDC_JWKS_URL,
@@ -87,7 +89,15 @@ def _decode_yandex_diagnostics_token(token: str) -> dict[str, Any]:
     return _decode_github_oidc_token(token, audience=YANDEX_DIAGNOSTICS_AUDIENCE)
 
 
-def _validate_github_claims(claims: Mapping[str, Any], *, yandex_diagnostics: bool = False) -> None:
+def _decode_admin_configuration_token(token: str) -> dict[str, Any]:
+    return _decode_github_oidc_token(token, audience=ADMIN_CONFIGURATION_AUDIENCE)
+
+
+def _validate_github_claims(
+    claims: Mapping[str, Any], *, yandex_diagnostics: bool = False, configure_admin: bool = False,
+) -> None:
+    if yandex_diagnostics and configure_admin:
+        raise GitHubOIDCAuthenticationError("Conflicting workflow purpose")
     expected_claims = {
         "environment": "production",
         "aud": YANDEX_DIAGNOSTICS_AUDIENCE if yandex_diagnostics else GITHUB_OIDC_AUDIENCE,
@@ -97,6 +107,8 @@ def _validate_github_claims(claims: Mapping[str, Any], *, yandex_diagnostics: bo
         "runner_environment": "github-hosted",
         "workflow_ref": YANDEX_DIAGNOSTICS_WORKFLOW_REF if yandex_diagnostics else GITHUB_WORKFLOW_REF,
     }
+    if configure_admin:
+        expected_claims.update(aud=ADMIN_CONFIGURATION_AUDIENCE, workflow_ref=ADMIN_CONFIGURATION_WORKFLOW_REF)
     allowed_events = {"workflow_run", "workflow_dispatch"} if yandex_diagnostics else {"workflow_dispatch"}
     if claims.get("event_name") not in allowed_events:
         raise GitHubOIDCAuthenticationError("GitHub Actions event is not trusted")
@@ -122,11 +134,15 @@ def _validate_github_claims(claims: Mapping[str, Any], *, yandex_diagnostics: bo
         raise GitHubOIDCAuthenticationError("GitHub Actions token claims are incomplete")
 
 
-async def verify_github_oidc_token(token: str, *, yandex_diagnostics: bool = False) -> dict[str, Any]:
+async def verify_github_oidc_token(
+    token: str, *, yandex_diagnostics: bool = False, configure_admin: bool = False,
+) -> dict[str, Any]:
     if not token or len(token) > 16_384:
         raise GitHubOIDCAuthenticationError("GitHub Actions token is invalid")
     try:
         decoder = _decode_yandex_diagnostics_token if yandex_diagnostics else _decode_github_oidc_token
+        if configure_admin:
+            decoder = _decode_admin_configuration_token
         claims = await asyncio.to_thread(decoder, token)
     except PyJWKClientConnectionError as exc:
         raise GitHubOIDCUnavailableError("GitHub OIDC verification is unavailable") from exc
@@ -135,7 +151,7 @@ async def verify_github_oidc_token(token: str, *, yandex_diagnostics: bool = Fal
     except Exception as exc:
         raise GitHubOIDCUnavailableError("GitHub OIDC verification is unavailable") from exc
 
-    _validate_github_claims(claims, yandex_diagnostics=yandex_diagnostics)
+    _validate_github_claims(claims, yandex_diagnostics=yandex_diagnostics, configure_admin=configure_admin)
     expires_at = int(claims["exp"])
     ttl_seconds = max(expires_at - int(time.time()) + 15, 1)
     replay_value = f"{GITHUB_OIDC_ISSUER}|{claims['jti']}"

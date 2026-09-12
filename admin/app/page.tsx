@@ -1,5 +1,7 @@
 "use client";
 
+import { canAccessSection } from "./lib/permissions";
+
 import { MediaGallery, OperationalDrawer, TrafficCounts } from "./operations";
 
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -182,7 +184,7 @@ function Login({ onDone }: { onDone: (user: SessionUser) => void }) {
         <div className="login-copy">
           <Status tone="green">Backend подключён</Status>
           <h1>{step === "phone" ? "Вход администратора" : step === "code" ? "Введите код из SMS" : "Двухфакторная проверка"}</h1>
-          <p>{step === "phone" ? "Используйте номер администратора, указанный при установке." : step === "code" ? "Код действует пять минут." : "Введите одноразовый код из приложения-аутентификатора."}</p>
+          <p>{step === "phone" ? "Вход для администраторов и модераторов, которым выдан доступ." : step === "code" ? "Код действует пять минут." : "Введите одноразовый код из приложения-аутентификатора."}</p>
         </div>
         <form onSubmit={submit} className="login-form">
           {step === "phone" ? (
@@ -256,7 +258,8 @@ function DataTable({ children }: { children: ReactNode }) {
 }
 
 function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => void }) {
-  const [section, setSection] = useState<NavKey>("overview");
+  const isAdmin = user.role === "admin";
+  const [section, setSection] = useState<NavKey>(isAdmin ? "overview" : "moderation");
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -275,6 +278,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   const searchRef = useRef<HTMLInputElement>(null);
 
   const loadSummary = useCallback(async () => {
+    if (!isAdmin) return;
     const [analyticsResult, dashboardResult, auditResult] = await Promise.all([
       jsonRequest<AnalyticsData>("/api/backend/admin/analytics/overview?granularity=day"),
       jsonRequest<Record<string, number>>("/api/backend/admin/dashboard"),
@@ -283,12 +287,13 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
     setAnalytics(analyticsResult);
     setDashboard(dashboardResult);
     setAudit(auditResult.items);
-  }, []);
+  }, [isAdmin]);
 
   const loadSection = useCallback(async (key: NavKey, search: string) => {
     setLoading(true);
     setError("");
     try {
+      if (!canAccessSection(user.role, key)) throw new Error("Раздел доступен только администратору");
       if (key === "overview" || key === "analytics") {
         await loadSummary();
         setRecords([]);
@@ -333,7 +338,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
     } finally {
       setLoading(false);
     }
-  }, [loadSummary, offset]);
+  }, [loadSummary, offset, user.role]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadSection(section, query); }, 220);
@@ -352,6 +357,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   }, []);
 
   function navigate(key: NavKey) {
+    if (!canAccessSection(user.role, key)) return;
     setSection(key); setOffset(0); setQuery(""); setMenuOpen(false); setSelected(null); setNotice("");
   }
 
@@ -378,9 +384,9 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
         <div className="network-live"><i /><span><strong>Backend подключён</strong><small>данные обновляются по API</small></span></div>
         <nav>
           <small className="nav-label">УПРАВЛЕНИЕ</small>
-          {navigation.slice(0, 8).map((item) => <button key={item.key} aria-current={section === item.key ? "page" : undefined} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i aria-hidden="true">{item.icon}</i><span>{item.label}</span></button>)}
-          <small className="nav-label second">СИСТЕМА</small>
-          {navigation.slice(8).map((item) => <button key={item.key} aria-current={section === item.key ? "page" : undefined} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i aria-hidden="true">{item.icon}</i><span>{item.label}</span></button>)}
+          {navigation.slice(0, 8).filter((item) => canAccessSection(user.role, item.key)).map((item) => <button key={item.key} aria-current={section === item.key ? "page" : undefined} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i aria-hidden="true">{item.icon}</i><span>{item.label}</span></button>)}
+          {isAdmin && <small className="nav-label second">СИСТЕМА</small>}
+          {navigation.slice(8).filter((item) => canAccessSection(user.role, item.key)).map((item) => <button key={item.key} aria-current={section === item.key ? "page" : undefined} className={section === item.key ? "active" : ""} onClick={() => navigate(item.key)}><i aria-hidden="true">{item.icon}</i><span>{item.label}</span></button>)}
         </nav>
         <div className="sidebar-foot"><button className="profile" onClick={onLogout}><span>{(user.display_name || "А").slice(0, 2).toUpperCase()}</span><span><strong>{user.display_name || "Администратор"}</strong><small>{user.role === "moderator" ? "Модератор · выйти" : "Главный администратор · выйти"}</small></span><i>↗</i></button></div>
       </aside>
@@ -392,16 +398,16 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
           <div className="top-actions"><button className="sync" onClick={() => void loadSection(section, query)}><i />Обновить данные</button><button className="notification" aria-label="Открытые обращения" onClick={() => navigate("support")}>◌<b>{analytics?.operations.support_open ?? 0}</b></button></div>
         </header>
         <div className="content" id="admin-content" role="main">
-          <div className="page-head"><div><p>{today}</p><h1>{title.title}</h1><span>{title.subtitle}</span></div><div className="page-actions"><span className="period-button">Период: 30 дней</span><button className="primary-button" onClick={() => setAddOpen(true)}>＋ Добавить находку</button></div></div>
+          <div className="page-head"><div><p>{today}</p><h1>{title.title}</h1><span>{title.subtitle}</span></div><div className="page-actions">{isAdmin && <><span className="period-button">Период: 30 дней</span><button className="primary-button" onClick={() => setAddOpen(true)}>＋ Добавить находку</button></>}</div></div>
           {error && <div className="alert error-alert" role="alert"><strong>Ошибка</strong><span>{error}</span><button aria-label="Закрыть сообщение" onClick={() => setError("")}>×</button></div>}
           {notice && <div className="alert success-alert" role="status"><strong>Готово</strong><span>{notice}</span><button aria-label="Закрыть сообщение" onClick={() => setNotice("")}>×</button></div>}
           {loading && <div className="loading-line" role="status" aria-label="Загрузка данных"><i /></div>}
           {section === "overview" && <Dashboard analytics={analytics} dashboard={dashboard} audit={audit} onNavigate={navigate} />}
-          {section === "items" && <Listings rows={records as ListingRow[]} total={total} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
+          {section === "items" && <Listings canExport={isAdmin} rows={records as ListingRow[]} total={total} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
           {section === "claims" && <Claims rows={records as ClaimRow[]} total={total} onAction={action} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
           {section === "matches" && <Matches rows={records as MatchRow[]} onAction={action} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
           {section === "organizations" && <Organizations rows={records as OrganizationRow[]} total={total} onAction={action} />}
-          {section === "users" && <Users rows={records as UserRow[]} total={total} onAction={action} />}
+          {section === "users" && <Users currentUserId={user.id} rows={records as UserRow[]} total={total} onAction={action} />}
           {section === "moderation" && <Moderation rows={records as ModerationRow[]} onAction={action} />}
           {section === "support" && <Support rows={records as TicketRow[]} total={total} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
           {section === "integrations" && <Integrations health={health} operations={operations} organizations={records as OrganizationRow[]} analytics={analytics} />}
@@ -411,13 +417,13 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
         </div>
       </section>
       {selected && ["items", "claims", "support"].includes(section) ? <OperationalDrawer key={String(selected.id)} id={String(selected.id)} kind={section === "claims" ? "claim" : section === "support" ? "ticket" : "listing"} onClose={() => setSelected(null)} onChanged={() => {void loadSection(section,query); void loadSummary();}} /> : selected && <DetailDrawer data={selected} onClose={() => setSelected(null)} />}
-      {addOpen && <AddModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); setNotice("Черновик создан. Откройте карточку в реестре, добавьте фотографии и отправьте её на модерацию."); void loadSection(section, query); void loadSummary(); }} />}
+      {isAdmin && addOpen && <AddModal onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); setNotice("Черновик создан. Откройте карточку в реестре, добавьте фотографии и отправьте её на модерацию."); void loadSection(section, query); void loadSummary(); }} />}
     </main>
   );
 }
 
-function Listings({ rows, total, onOpen }: { rows: ListingRow[]; total: number; onOpen: (row: ListingRow) => void }) {
-  return <DataTable><div className="registry-tools"><div><strong>{number(total)}</strong><span> находок в реестре</span></div><a className="filter-button" href="/api/backend/admin/exports/overview.csv">⇩ Экспорт CSV</a></div><div className="data-table"><div className="data-row data-head"><span>ID</span><span>Предмет</span><span>Регион</span><span>Дата</span><span>Статус</span><span>Модерация</span><span /></div>{rows.map((row) => <button className="data-row" key={row.id} onClick={() => onOpen(row)}><code>{row.id.slice(0, 8)}</code><span className="item-cell"><i>{row.title.slice(0, 1)}</i><span><strong>{row.title}</strong><small>{row.category}</small></span></span><span>{row.region || "Не указан"}</span><span>{formatDate(row.created_at)}</span><Status tone={statusTone(row.status)}>{statusName(row.status)}</Status><Status tone={statusTone(row.moderation_status)}>{statusName(row.moderation_status)}</Status><span className="arrow">›</span></button>)}{!rows.length && <Empty />}</div></DataTable>;
+function Listings({ rows, total, onOpen, canExport }: { canExport: boolean; rows: ListingRow[]; total: number; onOpen: (row: ListingRow) => void }) {
+  return <DataTable><div className="registry-tools"><div><strong>{number(total)}</strong><span> находок в реестре</span></div>{canExport && <a className="filter-button" href="/api/backend/admin/exports/overview.csv">⇩ Экспорт CSV</a>}</div><div className="data-table"><div className="data-row data-head"><span>ID</span><span>Предмет</span><span>Регион</span><span>Дата</span><span>Статус</span><span>Модерация</span><span /></div>{rows.map((row) => <button className="data-row" key={row.id} onClick={() => onOpen(row)}><code>{row.id.slice(0, 8)}</code><span className="item-cell"><i>{row.title.slice(0, 1)}</i><span><strong>{row.title}</strong><small>{row.category}</small></span></span><span>{row.region || "Не указан"}</span><span>{formatDate(row.created_at)}</span><Status tone={statusTone(row.status)}>{statusName(row.status)}</Status><Status tone={statusTone(row.moderation_status)}>{statusName(row.moderation_status)}</Status><span className="arrow">›</span></button>)}{!rows.length && <Empty />}</div></DataTable>;
 }
 
 function Claims({ rows, total, onOpen }: { rows: ClaimRow[]; total: number; onAction: (path: string, init: RequestInit, message: string) => void; onOpen: (row: ClaimRow) => void }) {
@@ -432,8 +438,42 @@ function Organizations({ rows, total, onAction }: { rows: OrganizationRow[]; tot
   return <><section className="org-cards"><article><span>{number(total)}</span><strong>организаций</strong><small>в общей сети</small></article><article><span>{number(rows.reduce((sum, row) => sum + row.inventory, 0))}</span><strong>записей</strong><small>в текущей выборке</small></article><article><span>{rows.filter((row) => row.api_enabled).length}</span><strong>API включён</strong><small>организаций</small></article><article><span>{rows.reduce((sum, row) => sum + row.webhooks, 0)}</span><strong>вебхуков</strong><small>настроено</small></article></section><section className="panel registry-panel"><div className="org-table"><div className="org-row org-head"><span>Организация</span><span>ИНН</span><span>Находки</span><span>Вебхуки</span><span>API</span><span>Статус</span><span /></div>{rows.map((row) => <div className="org-row" key={row.id}><span className="org-name"><i>{row.name.slice(0, 1)}</i><strong>{row.name}</strong></span><span>{row.inn}</span><b>{row.inventory}</b><b>{row.webhooks}</b><b>{row.api_enabled ? "Вкл." : "Выкл."}</b><Status tone={statusTone(row.status)}>{statusName(row.status)}</Status>{row.status === "pending" ? <button className="primary-button mini-button" onClick={() => void onAction("/admin/organizations/" + row.id + "/verify", { method: "POST", body: JSON.stringify({ decision: "approve", reason: "Документы проверены администратором" }) }, "Организация подтверждена")}>Проверить</button> : <span />}</div>)}{!rows.length && <Empty />}</div></section></>;
 }
 
-function Users({ rows, total, onAction }: { rows: UserRow[]; total: number; onAction: (path: string, init: RequestInit, message: string) => void }) {
-  return <section className="panel users-panel"><div className="user-stats"><div><strong>{number(total)}</strong><span>пользователей</span></div><div><strong>{rows.filter((row) => row.status === "active").length}</strong><span>активных в выборке</span></div><div><strong>{rows.filter((row) => row.admin_2fa_enabled).length}</strong><span>с включённой 2FA</span></div><div><strong>{rows.filter((row) => row.status === "blocked").length}</strong><span>ограничены</span></div></div><div className="user-grid">{rows.map((row) => <div className="user-card" key={row.id}><span className="avatar">{(row.display_name || "П").slice(0, 1)}</span><span><strong>{row.display_name || "Пользователь"}</strong><small>{row.phone_masked} · {row.role}</small></span><Status tone={statusTone(row.status)}>{statusName(row.status)}</Status><button className="filter-button mini-button" onClick={() => void onAction("/admin/users/" + row.id, { method: "PATCH", body: JSON.stringify({ status: row.status === "blocked" ? "active" : "blocked" }) }, row.status === "blocked" ? "Пользователь разблокирован" : "Пользователь заблокирован")}>{row.status === "blocked" ? "Разблокировать" : "Ограничить"}</button></div>)}</div>{!rows.length && <Empty />}</section>;
+function Users({ rows, total, onAction, currentUserId }: {
+  currentUserId: string; rows: UserRow[]; total: number;
+  onAction: (path: string, init: RequestInit, message: string) => void;
+}) {
+  function changeModerator(row: UserRow) {
+    const removing = row.role === "moderator";
+    if (!window.confirm(removing ? "Снять доступ модератора?" : "Выдать этому пользователю доступ к модерации и поддержке?")) return;
+    void onAction("/admin/users/" + row.id, {
+      method: "PATCH", body: JSON.stringify({ role: removing ? "user" : "moderator" }),
+    }, "Роль изменена. Сотруднику нужно войти снова");
+  }
+
+  return <section className="panel users-panel">
+    <div className="user-stats">
+      <div><strong>{number(total)}</strong><span>пользователей</span></div>
+      <div><strong>{rows.filter((row) => row.status === "active").length}</strong><span>активных в выборке</span></div>
+      <div><strong>{rows.filter((row) => row.admin_2fa_enabled).length}</strong><span>с включённой 2FA</span></div>
+      <div><strong>{rows.filter((row) => row.status === "blocked").length}</strong><span>ограничены</span></div>
+    </div>
+    <div className="user-grid">{rows.map((row) => <div className="user-card" key={row.id}>
+      <span className="avatar">{(row.display_name || "П").slice(0, 1)}</span>
+      <span><strong>{row.display_name || "Пользователь"}</strong><small>{row.phone_masked} · {row.role}</small></span>
+      <Status tone={statusTone(row.status)}>{statusName(row.status)}</Status>
+      <button className="filter-button mini-button" disabled={row.id === currentUserId || row.status === "deleted"}
+        onClick={() => void onAction("/admin/users/" + row.id, {
+          method: "PATCH", body: JSON.stringify({ status: row.status === "blocked" ? "active" : "blocked" }),
+        }, row.status === "blocked" ? "Пользователь разблокирован" : "Пользователь заблокирован")}>
+        {row.status === "blocked" ? "Разблокировать" : "Ограничить"}
+      </button>
+      {row.id !== currentUserId && row.status === "active" && row.verified_at && ["user", "moderator"].includes(row.role) &&
+        <button className="filter-button mini-button" onClick={() => changeModerator(row)}>
+          {row.role === "moderator" ? "Снять роль модератора" : "Назначить модератором"}
+        </button>}
+    </div>)}</div>
+    {!rows.length && <Empty />}
+  </section>;
 }
 
 function Moderation({ rows, onAction }: { rows: ModerationRow[]; onAction: (path: string, init: RequestInit, message: string) => void }) {
@@ -516,3 +556,4 @@ export default function Home() {
   if (!user) return <Login onDone={setUser} />;
   return <AdminConsole user={user} onLogout={() => void logout()} />;
 }
+

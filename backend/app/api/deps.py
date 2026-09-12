@@ -30,6 +30,8 @@ async def current_user(
     user = await db.get(User, user_id)
     if not user or user.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Аккаунт недоступен")
+    if payload.get("role") != user.role:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Права изменились. Войдите снова")
     if user.role in {"admin", "moderator"} and user.admin_2fa_enabled and not payload.get("mfa"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Требуется двухфакторная авторизация")
     return user
@@ -47,7 +49,8 @@ def require_roles(*roles: str) -> Callable:
     return dependency
 
 
-AdminUser = Annotated[User, Depends(require_roles("admin", "moderator"))]
+AdminUser = Annotated[User, Depends(require_roles("admin"))]
+ModeratorUser = Annotated[User, Depends(require_roles("admin", "moderator"))]
 
 
 async def organization_api_key(

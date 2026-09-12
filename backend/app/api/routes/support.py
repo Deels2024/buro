@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
 
-from app.api.deps import DB, AdminUser, CurrentUser
+from app.api.deps import DB, CurrentUser, ModeratorUser
 from app.core.security import decrypt_json, encrypt_json
 from app.db.models import OrganizationMember, SupportMessage, SupportTicket
 from app.schemas import (
@@ -132,7 +132,7 @@ async def add_message(
 @admin_router.get("/tickets")
 async def admin_tickets(
     db: DB,
-    _: AdminUser,
+    _: ModeratorUser,
     status: str | None = None,
     priority: str | None = None,
     assigned_to: UUID | None = None,
@@ -167,7 +167,7 @@ async def update_ticket(
     ticket_id: UUID,
     payload: SupportTicketUpdate,
     db: DB,
-    admin: AdminUser,
+    admin: ModeratorUser,
 ) -> SupportTicket:
     ticket = await db.get(SupportTicket, ticket_id)
     if not ticket:
@@ -188,3 +188,4 @@ async def update_ticket(
     await db.commit()
     await db.refresh(ticket)
     return ticket
+

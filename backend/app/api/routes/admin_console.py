@@ -5,9 +5,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, func, or_, select, update
 
-from app.api.deps import DB, AdminUser
+from app.api.deps import DB, AdminUser, ModeratorUser
 from app.core.security import decrypt_json, mask_phone
 from app.db.models import (
     AuditEvent,
@@ -17,6 +17,7 @@ from app.db.models import (
     Listing,
     MatchCandidate,
     Organization,
+    RefreshToken,
     SupportTicket,
     SystemSetting,
     User,
@@ -199,14 +200,26 @@ async def update_user(
     db: DB,
     admin: AdminUser,
 ) -> dict:
-    target = await db.get(User, user_id)
+    target = await db.scalar(select(User).where(User.id == user_id).with_for_update())
     if not target:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    if target.id == admin.id and payload.status in {"blocked", "deleted"}:
-        raise HTTPException(status_code=409, detail="Нельзя заблокировать собственный аккаунт")
-    data = payload.model_dump(exclude_unset=True)
+    if target.id == admin.id and (
+        payload.status in {"blocked", "deleted"}
+        or payload.role not in {None, "admin"}
+    ):
+        raise HTTPException(status_code=409, detail="Нельзя отключить собственный доступ администратора")
+    data = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if data.get("role") in {"admin", "moderator"} and (
+        target.status != "active" or not target.verified_at
+    ):
+        raise HTTPException(status_code=409, detail="Сотрудник должен сначала подтвердить телефон в приложении")
+    changed = any(getattr(target, key) != value for key, value in data.items())
     for key, value in data.items():
         setattr(target, key, value)
+    if changed:
+        await db.execute(update(RefreshToken).where(
+            RefreshToken.user_id == target.id, RefreshToken.revoked_at.is_(None),
+        ).values(revoked_at=datetime.now(UTC)))
     add_audit(
         db,
         actor_id=admin.id,
@@ -258,7 +271,7 @@ async def organizations(
 @router.get("/listings")
 async def listings(
     db: DB,
-    _: AdminUser,
+    _: ModeratorUser,
     query: str | None = Query(None, max_length=180),
     kind: str | None = None,
     status: str | None = None,
@@ -307,7 +320,7 @@ async def listings(
 @router.get("/claims")
 async def claims(
     db: DB,
-    _: AdminUser,
+    _: ModeratorUser,
     status: str | None = None,
     query: str | None = Query(None, max_length=200),
     min_risk: float | None = Query(None, ge=0, le=1),
@@ -349,7 +362,7 @@ async def claims(
 @router.get("/matches")
 async def matches(
     db: DB,
-    _: AdminUser,
+    _: ModeratorUser,
     status: str | None = None,
     min_score: float = Query(0, ge=0, le=100),
     limit: int = Query(50, ge=1, le=100),
@@ -388,7 +401,7 @@ async def matches(
 @router.get("/handovers")
 async def handovers(
     db: DB,
-    _: AdminUser,
+    _: ModeratorUser,
     completed: bool | None = None,
     method: str | None = None,
     limit: int = Query(50, ge=1, le=100),
