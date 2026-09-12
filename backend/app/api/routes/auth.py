@@ -318,6 +318,12 @@ async def refresh(
 ) -> TokenPair:
     token_hash = hash_secret(payload.refresh_token)
     recovery_key = "refresh:recovery:" + hash_secret(f"{token_hash}|{operation}") if operation else None
+    # Role changes lock the same user before revoking sessions. Taking locks in
+    # this order prevents an in-flight refresh from escaping that revocation.
+    user_id = await db.scalar(select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash))
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительная сессия")
+    user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
     now = datetime.now(UTC)
     # Only one concurrent request may consume this refresh token. The SQL
     # predicate is rechecked under the row lock by PostgreSQL.
@@ -345,7 +351,6 @@ async def refresh(
             ))
     if not record:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Недействительная сессия")
-    user = await db.get(User, record.user_id)
     if not user or user.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Аккаунт недоступен")
     if user.role in {"admin", "moderator"} and user.admin_2fa_enabled and not record.mfa_verified:
