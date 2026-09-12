@@ -65,8 +65,8 @@ void main() {
     const actionKey = Key('action');
     await tester.pumpWidget(_app(BureauPage(
       title: 'Форма',
-      child: const SizedBox(key: formKey, width: double.infinity, height: 100),
       bottom: FilledButton(key: actionKey, onPressed: () {}, child: const Text('Продолжить')),
+      child: const SizedBox(key: formKey, width: double.infinity, height: 100),
     )));
     final form = tester.getRect(find.byKey(formKey));
     final action = tester.getRect(find.byKey(actionKey));
