@@ -85,8 +85,11 @@ Future<AppController> _open(WidgetTester tester, _Server server) async {
 }
 
 Future<void> _save(WidgetTester tester) async {
+  // Let EditableText finish revealing its caret before scrolling to the action.
+  await tester.pumpAndSettle();
   await tester.ensureVisible(find.text('Сохранить черновик'));
   await tester.pumpAndSettle();
+  expect(find.text('Сохранить черновик').hitTestable(), findsOneWidget);
   await tester.tap(find.text('Сохранить черновик'));
   await tester.pumpAndSettle();
 }
