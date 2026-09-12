@@ -1,6 +1,9 @@
 import time
+from types import SimpleNamespace
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.services import github_oidc
 from app.services.github_oidc import (
@@ -71,3 +74,34 @@ async def test_github_oidc_token_is_single_use(monkeypatch: pytest.MonkeyPatch) 
     assert await verify_github_oidc_token("signed-token") == claims
     with pytest.raises(GitHubOIDCAuthenticationError):
         await verify_github_oidc_token("signed-token")
+
+
+def test_maps_diagnostics_identity_cannot_configure_openai():
+    claims = trusted_claims()
+    with pytest.raises(GitHubOIDCAuthenticationError):
+        _validate_github_claims(claims, yandex_diagnostics=True)
+    claims.update(aud=github_oidc.YANDEX_DIAGNOSTICS_AUDIENCE,
+                  workflow_ref=github_oidc.YANDEX_DIAGNOSTICS_WORKFLOW_REF, event_name="workflow_run")
+    _validate_github_claims(claims, yandex_diagnostics=True)
+    with pytest.raises(GitHubOIDCAuthenticationError):
+        _validate_github_claims(claims)
+    for name, value in {"ref": "refs/heads/feature", "actor_id": "3", "event_name": "pull_request",
+                        "repository_id": "1", "environment": "staging"}.items():
+        with pytest.raises(GitHubOIDCAuthenticationError):
+            _validate_github_claims({**claims, name: value}, yandex_diagnostics=True)
+
+
+def test_signed_token_audience_is_isolated_between_diagnostics_and_key_installation(monkeypatch):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr(github_oidc._jwks_client, "get_signing_key_from_jwt",
+                        lambda _: SimpleNamespace(key=private_key.public_key()))
+    claims = trusted_claims()
+    token = jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": "test-key"})
+    assert github_oidc._decode_github_oidc_token(token)["aud"] == github_oidc.GITHUB_OIDC_AUDIENCE
+    with pytest.raises(jwt.InvalidAudienceError):
+        github_oidc._decode_yandex_diagnostics_token(token)
+    claims["aud"] = github_oidc.YANDEX_DIAGNOSTICS_AUDIENCE
+    token = jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": "test-key"})
+    assert github_oidc._decode_yandex_diagnostics_token(token)["aud"] == github_oidc.YANDEX_DIAGNOSTICS_AUDIENCE
+    with pytest.raises(jwt.InvalidAudienceError):
+        github_oidc._decode_github_oidc_token(token)
