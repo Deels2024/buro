@@ -119,7 +119,7 @@ class AIService:
         if not settings.openclip_url:
             return None
         try:
-            async with httpx.AsyncClient(timeout=settings.openclip_timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=settings.openclip_timeout_seconds, trust_env=False) as client:
                 response = await client.post(
                     f"{settings.openclip_url.rstrip('/')}/v1/embed/image",
                     json={"image_url": image_url},
@@ -135,7 +135,7 @@ class AIService:
         if not settings.openclip_url:
             return None
         try:
-            async with httpx.AsyncClient(timeout=settings.openclip_timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=settings.openclip_timeout_seconds, trust_env=False) as client:
                 response = await client.post(
                     f"{settings.openclip_url.rstrip('/')}/v1/embed/text",
                     json={"text": text},
