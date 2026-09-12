@@ -233,6 +233,7 @@ class AIPhotoSearchRequest(APIModel):
     target_kind: Literal["lost", "found"] | None = None
     category: str | None = Field(default=None, max_length=80)
     region: str | None = Field(default=None, max_length=180)
+    since: datetime | None = None
     limit: int = Field(default=20, ge=1, le=50)
 
 

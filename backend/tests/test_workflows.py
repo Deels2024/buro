@@ -234,3 +234,110 @@ async def test_manual_location_clears_old_coordinates_and_legacy_location_stays_
     renamed = await client.patch(f'/v1/listings/{lid}', headers=h('holder'),
                                  json={'title': 'Рюкзак после переименования'})
     assert renamed.json()['location'] is None
+
+
+async def search_listing(sessions, owner, **changes):
+    async with sessions() as db:
+        listing = Listing(**{
+            'owner_id': owner.id, 'kind': 'found', 'status': 'active',
+            'moderation_status': 'approved', 'title': 'Чёрный рюкзак',
+            'description': 'С красной молнией', 'category': 'bags',
+            'tags': ['Путешествия'], 'public_features': ['Светоотражатель'],
+            'event_at': datetime.now(UTC), 'published_at': datetime.now(UTC),
+            'public_region': 'Санкт-Петербург',
+            'storage_code': 'privatecabinet',
+            'hidden_features_cipher': encrypt_json(['privateproof']),
+            'exact_location_cipher': encrypt_json({'exact_address': 'privateaddress'}),
+            **changes,
+        })
+        db.add(listing)
+        await db.commit()
+        return listing
+
+
+async def test_public_search_tokens_filters_and_private_exclusions(workflow):
+    client, sessions, users, _ = workflow
+    first = await search_listing(sessions, users['holder'], title='red backpack', description='zipper', tags=['travel'], public_features=['reflector'])
+    second = await search_listing(sessions, users['holder'], title='red backpack', description='zipper', kind='lost')
+    for changes in ({'status':'draft'}, {'moderation_status':'pending'}, {'moderation_status':'blocked'}, {'status':'closed'}):
+        await search_listing(sessions, users['holder'], title='red backpack', **changes)
+    async def search(**params):
+        r = await client.get('/v1/listings', params=params)
+        assert r.status_code == 200, r.text
+        return r.json()
+    result = await search(query='backpack red')
+    assert result['total'] == 2
+    assert {row['id'] for row in result['items']} == {str(first.id), str(second.id)}
+    for query in ('travel reflector', 'privatecabinet', 'privateproof', 'privateaddress', '%_*&|!'):
+        result = await search(query=query)
+        assert result['total'] == (1 if query == 'travel reflector' else 0)
+    assert (await search(query='red', kind='found', category='Сумки', region='Петербург'))['total'] == 1
+    assert (await search(query='red', region='%'))['total'] == 0
+    assert (await search(query='red', since='2099-01-01T00:00:00Z'))['total'] == 0
+    first_page = await search(query='red', limit=1)
+    second_page = await search(query='red', limit=1, offset=1)
+    assert first_page['total'] == second_page['total'] == 2
+    assert first_page['items'][0]['id'] != second_page['items'][0]['id']
+    assert 'exact_location_cipher' not in str(first_page)
+    assert (await search(query='   '))['total'] == 2
+
+
+@pytest.mark.skipif(not os.environ.get('TEST_DATABASE_URL', '').startswith('postgresql'), reason='Russian dictionary and GIN require PostgreSQL')
+async def test_russian_search_morphology_prefix_json_and_index(workflow):
+    import importlib.util
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    client, sessions, users, _ = workflow
+    expected = await search_listing(sessions, users['holder'])
+    await search_listing(sessions, users['holder'], title='Зонт', description='Синий зонт', category='other', tags=[], public_features=[])
+    # Exercise the actual migration on existing rows; SQL generation alone cannot validate GIN immutability.
+    spec = importlib.util.spec_from_file_location('search_migration', 'alembic/versions/0003_public_search.py')
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    async with sessions() as db:
+        connection = await db.connection()
+        def create_index(sync_connection):
+            with Operations.context(MigrationContext.configure(sync_connection)):
+                migration.upgrade()
+        await connection.run_sync(create_index)
+        await db.commit()
+    for query in ('молния красная рюкзак', 'ЧЕРНЫЙ рюкзак', 'чёрный', 'рюк', 'светоотражатели', 'путешествие', 'петербург рюкзак'):
+        result = await client.get('/v1/listings', params={'query':query})
+        assert result.status_code == 200, result.text
+        assert [item['id'] for item in result.json()['items']] == [str(expected.id)], (query, result.text)
+    # Relevance beats recency, and public JSON words are decoded rather than matching escaped Unicode.
+    await search_listing(sessions, users['holder'], title='Дорожная вещь', description='Чёрный рюкзак с красной молнией')
+    result = (await client.get('/v1/listings', params={'query':'чёрный рюкзак'})).json()
+    assert result['total'] == 2 and result['items'][0]['id'] == str(expected.id)
+    assert (await client.get('/v1/listings', params={'query':'и в на'})).status_code == 200
+
+
+@pytest.mark.skipif(not os.environ.get('TEST_DATABASE_URL', '').startswith('postgresql'), reason='Cosine distance requires pgvector')
+async def test_photo_search_unique_listings_and_filters(workflow):
+    from datetime import timedelta
+
+    client, sessions, users, h = workflow
+    first = await search_listing(sessions, users['holder'])
+    second = await search_listing(sessions, users['holder'])
+    others = [await search_listing(sessions, users['holder'], **change) for change in (
+        {'kind':'lost'}, {'category':'electronics'}, {'public_region':'Москва'},
+        {'event_at':datetime.now(UTC)-timedelta(days=365)}, {'moderation_status':'pending'}, {'status':'draft'},
+    )]
+    query_id = await photo(sessions, users['claimant'])
+    async with sessions() as db:
+        query = await db.get(MediaObject, UUID(query_id))
+        query.embedding = [1.0] + [0.0]*511
+        for listing in [first, second, *others]:
+            for _ in range(8 if listing.id == first.id else 1):
+                db.add(MediaObject(owner_id=users['holder'].id, listing_id=listing.id, purpose='listing', object_key=uuid4().hex,
+                    mime_type='image/jpeg', size_bytes=100, sha256='0'*64, status='ready',
+                    embedding=([1.0, 0.0] if listing.id == first.id else [0.9, 0.1])+[0.0]*510))
+        await db.commit()
+    payload = {'media_id':query_id, 'target_kind':'found', 'category':'Сумки', 'region':'Петербург',
+        'since':(datetime.now(UTC)-timedelta(days=7)).isoformat(), 'limit':2}
+    result = await client.post('/v1/listings/ai/search', json=payload, headers=h('claimant'))
+    assert result.status_code == 200, result.text
+    assert [item['listing']['id'] for item in result.json()] == [str(first.id), str(second.id)]
+    assert (await client.post('/v1/listings/ai/search', json=payload, headers=h('stranger'))).status_code == 404

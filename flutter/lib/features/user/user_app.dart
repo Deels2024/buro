@@ -730,12 +730,13 @@ class _SearchViewState extends State<SearchView> {
   bool _map = false;
   int _offset = 0;
   SearchFilters _filters = const SearchFilters();
-  late Future<JsonMap> _results;
+  Future<JsonMap>? _results;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _results = _search();
+    // Keyboard, theme and accessibility changes must not restart an active request.
+    _results ??= _search();
   }
 
   Future<JsonMap> _search() => AppScope.of(context, listen: false).api.search(
@@ -748,7 +749,22 @@ class _SearchViewState extends State<SearchView> {
     offset: _offset,
   );
 
-  void _reload() => setState(() { _offset = 0; _results = _search(); });
+  void _reload() {
+    _debounce?.cancel();
+    if (!mounted) return;
+    setState(() { _offset = 0; _results = _search(); });
+  }
+
+  void _reset() {
+    _query.clear();
+    _filters = const SearchFilters();
+    _reload();
+  }
+
+  void _setKind(String? kind) {
+    _filters = SearchFilters(kind: kind, category: _filters.category, region: _filters.region, since: _filters.since);
+    _reload();
+  }
 
   @override
   void dispose() {
@@ -785,6 +801,9 @@ class _SearchViewState extends State<SearchView> {
               children: [
                 TextField(
                   controller: _query,
+                  maxLength: 200,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) { FocusScope.of(context).unfocus(); _reload(); },
                   onChanged: (_) {
                     _debounce?.cancel();
                     _debounce = Timer(
@@ -792,11 +811,25 @@ class _SearchViewState extends State<SearchView> {
                       _reload,
                     );
                   },
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search_rounded),
-                    hintText: 'Название или описание',
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    hintText: 'Вещь, цвет, бренд или особая примета',
+                    counterText: '',
+                    suffixIcon: _query.text.isEmpty ? null : IconButton(
+                      tooltip: 'Очистить запрос', icon: const Icon(Icons.close),
+                      onPressed: () { _query.clear(); _reload(); },
+                    ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  ChoiceChip(label: const Text('Всё'), selected: _filters.kind == null, onSelected: (_) => _setKind(null)),
+                  ChoiceChip(label: const Text('Я потерял'), selected: _filters.kind == 'found', onSelected: (_) => _setKind('found')),
+                  ChoiceChip(label: const Text('Я нашёл'), selected: _filters.kind == 'lost', onSelected: (_) => _setKind('lost')),
+                ]),
+                const SizedBox(height: 8),
+                Text(_filters.kind == 'found' ? 'Ищем среди найденных вещей'
+                  : _filters.kind == 'lost' ? 'Ищем объявления тех, кто потерял вещь' : 'Ищем среди пропаж и находок'),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -820,7 +853,7 @@ class _SearchViewState extends State<SearchView> {
                                 SearchFiltersPage(initial: _filters),
                           ),
                         );
-                        if (value != null) {
+                        if (value != null && mounted) {
                           _filters = value;
                           _reload();
                         }
@@ -831,12 +864,15 @@ class _SearchViewState extends State<SearchView> {
                       ),
                     ),
                     GestureDetector(
-                      onTap: () => pushPage(context, const PhotoSearchPage()),
+                      onTap: () => pushPage(context, PhotoSearchPage(filters: _filters)),
                       child: const BureauPill(
                         'Фото',
                         icon: Icons.camera_alt_outlined,
                       ),
                     ),
+                    if (_filters.count > 0) TextButton(onPressed: () {
+                      _filters = const SearchFilters(); _reload();
+                    }, child: const Text('Сбросить фильтры')),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -847,16 +883,16 @@ class _SearchViewState extends State<SearchView> {
                       return const Center(
                         child: Padding(
                           padding: EdgeInsets.all(40),
-                          child: CircularProgressIndicator(),
+                          child: Column(children: [CircularProgressIndicator(), SizedBox(height: 16), Text('Ищем объявления…')]),
                         ),
                       );
                     }
                     if (snapshot.hasError) {
-                      return NoticeCard(
-                        apiErrorText(snapshot.error!),
-                        color: BureauColors.red,
-                        background: BureauColors.redSoft,
-                      );
+                      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        NoticeCard(apiErrorText(snapshot.error!), color: BureauColors.red, background: BureauColors.redSoft),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(onPressed: _reload, icon: const Icon(Icons.refresh), label: const Text('Повторить поиск')),
+                      ]);
                     }
                     final data = snapshot.requireData;
                     final items = List<JsonMap>.from(data['items'] as List);
@@ -864,6 +900,7 @@ class _SearchViewState extends State<SearchView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         SectionTitle('${data['total']} результатов'),
+                        const Padding(padding: EdgeInsets.only(bottom: 12), child: Text('Опубликованные объявления после модерации')),
                         if (_map)
                           _MapPreview(
                             items: items,
@@ -879,10 +916,14 @@ class _SearchViewState extends State<SearchView> {
                           Text('Страница ${_offset~/24+1}'),
                           TextButton(onPressed:_offset+items.length >= (data['total'] as num)?null:()=>setState((){_offset+=24;_results=_search();}),child:const Text('Далее')),
                         ]),
-                        if (items.isEmpty)
-                          const NoticeCard(
-                            'По выбранным условиям ничего не найдено.',
-                          ),
+                        if (items.isEmpty) ...[
+                          const NoticeCard('Пока ничего не найдено. Попробуйте другие слова или уберите фильтры.'),
+                          const SizedBox(height: 12),
+                          OutlinedButton(onPressed: _reset, child: const Text('Показать все объявления')),
+                          const SizedBox(height: 12),
+                          FilledButton(onPressed: () => pushPage(context, CreateFlowPage(initialFound: _filters.kind == 'lost')),
+                            child: Text(_filters.kind == 'lost' ? 'Сообщить о находке' : 'Сообщить о пропаже')),
+                        ],
                       ],
                     );
                   },
@@ -1498,6 +1539,7 @@ class _SearchFiltersPageState extends State<SearchFiltersPage> {
     _days = widget.initial.since == null
         ? null
         : DateTime.now().difference(widget.initial.since!).inDays;
+    if (_days != null) _days = [7, 30, 90, 365].firstWhere((days) => days >= _days!, orElse: () => 365);
   }
 
   @override
@@ -1540,6 +1582,7 @@ class _SearchFiltersPageState extends State<SearchFiltersPage> {
         ),
         const SectionTitle('Категория'),
         DropdownButtonFormField<String>(
+          key: ValueKey('category-$_category'),
           initialValue: _category,
           isExpanded: true,
           items: [const DropdownMenuItem<String>(value: '', child: Text('Все категории')), ...categoryLabels.entries.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))],
@@ -1550,24 +1593,30 @@ class _SearchFiltersPageState extends State<SearchFiltersPage> {
         MapsTextField(controller: _region, label: 'Город или населённый пункт', cityOnly: true),
         const SectionTitle('Период'),
         DropdownButtonFormField<int>(
-          initialValue: _days,
+          key: ValueKey('period-$_days'),
+          initialValue: _days ?? 0,
           isExpanded: true,
-          items: const [7, 30, 90, 365]
+          items: const [0, 7, 30, 90, 365]
               .map(
                 (days) =>
-                    DropdownMenuItem(value: days, child: Text('$days дней')),
+                    DropdownMenuItem(value: days, child: Text(days == 0 ? 'За всё время' : '$days дней')),
               )
               .toList(),
-          onChanged: (value) => setState(() => _days = value),
+          onChanged: (value) => setState(() => _days = value == 0 ? null : value),
           decoration: const InputDecoration(hintText: 'За всё время'),
         ),
+        const SizedBox(height: 16),
+        TextButton(onPressed: () => setState(() {
+          _kind = null; _category = null; _days = null; _region.clear();
+        }), child: const Text('Сбросить все фильтры')),
       ],
     ),
   );
 }
 
 class PhotoSearchPage extends StatefulWidget {
-  const PhotoSearchPage({super.key});
+  const PhotoSearchPage({super.key, this.filters = const SearchFilters()});
+  final SearchFilters filters;
 
   @override
   State<PhotoSearchPage> createState() => _PhotoSearchPageState();
@@ -1577,9 +1626,11 @@ class _PhotoSearchPageState extends State<PhotoSearchPage> {
   XFile? _image;
   List<JsonMap>? _results;
   bool _loading = false;
+  String? _mediaId;
+  Object? _error;
 
   Future<void> _pickAndSearch() async {
-    final api = AppScope.of(context, listen: false).api;
+    if (_loading) return;
     final image = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       imageQuality: 88,
@@ -1588,9 +1639,20 @@ class _PhotoSearchPageState extends State<PhotoSearchPage> {
     if (image == null || !mounted) return;
     setState(() {
       _image = image;
-      _loading = true;
+      _mediaId = null;
+      _results = null;
+      _error = null;
     });
+    await _searchPhoto();
+  }
+
+  Future<void> _searchPhoto() async {
+    if (_loading || _image == null) return;
+    final api = AppScope.of(context, listen: false).api;
+    final image = _image!;
+    setState(() { _loading = true; _error = null; _results = null; });
     try {
+      if (_mediaId == null) {
       final bytes = await image.readAsBytes();
       final mime =
           image.mimeType ??
@@ -1603,10 +1665,13 @@ class _PhotoSearchPageState extends State<PhotoSearchPage> {
         mimeType: mime,
         purpose: 'listing',
       );
-      final results = await api.photoSearch(media.id);
+        _mediaId = media.id;
+      }
+      final results = await api.photoSearch(_mediaId!, targetKind: widget.filters.kind,
+        category: widget.filters.category, region: widget.filters.region, since: widget.filters.since);
       if (mounted) setState(() => _results = results);
     } catch (error) {
-      if (mounted) showApiError(context, error);
+      if (mounted) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -1622,6 +1687,8 @@ class _PhotoSearchPageState extends State<PhotoSearchPage> {
     ),
     child: Column(
       children: [
+        if (widget.filters.count > 0) Padding(padding: const EdgeInsets.only(bottom: 16),
+          child: Text('Применены фильтры поиска: ${widget.filters.count}')),
         Container(
           height: 280,
           width: double.infinity,
@@ -1654,6 +1721,11 @@ class _PhotoSearchPageState extends State<PhotoSearchPage> {
             padding: EdgeInsets.all(24),
             child: CircularProgressIndicator(),
           ),
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          NoticeCard(apiErrorText(_error!), color: BureauColors.red, background: BureauColors.redSoft),
+          OutlinedButton(onPressed: _loading ? null : _searchPhoto, child: const Text('Повторить поиск по фото')),
+        ],
         if (_results != null) ...[
           SectionTitle('${_results!.length} визуальных совпадений'),
           for (final result in _results!) ...[

@@ -343,6 +343,7 @@ class BureauApiClient {
       'GET',
       '/listings',
       authenticated: false,
+      timeout: const Duration(seconds: 15),
       query: {
         'limit': limit,
         'offset': offset,
@@ -401,8 +402,11 @@ class BureauApiClient {
     String? targetKind,
     String? category,
     String? region,
-  }) async => _maps(
-    await request(
+    DateTime? since,
+  }) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return _maps(await request(
       'POST',
       '/listings/ai/search',
       body: {
@@ -410,11 +414,17 @@ class BureauApiClient {
         'target_kind': targetKind,
         'category': category,
         'region': region,
+        'since': since?.toUtc().toIso8601String(),
         'limit': 20,
       },
       idempotencyKey: newIdempotencyKey(),
-    ),
-  );
+        ));
+      } on BureauApiException catch (error) {
+        if (!error.isConflict || attempt >= 15) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  }
   Future<List<JsonMap>> matches(String listingId) async =>
       _maps(await request('GET', '/listings/$listingId/matches'));
   Future<JsonMap> decideMatch(

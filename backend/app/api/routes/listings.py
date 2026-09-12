@@ -26,6 +26,7 @@ from app.schemas import (
 from app.services.ai import ai_service
 from app.services.cache import enqueue, rate_limit
 from app.services.categories import category_values
+from app.services.listing_search import text_search
 from app.services.matching import normalized_factors
 from app.services.serializers import listing_out, managed_listing_out
 from app.services.storage import storage
@@ -142,20 +143,21 @@ async def search_listings(
         filters.append(Listing.kind == kind)
     if category:
         filters.append(func.lower(Listing.category).in_(category_values(category)))
-    if region:
-        filters.append(Listing.public_region.ilike(f"%{region}%"))
+    if region and region.strip():
+        filters.append(Listing.public_region.icontains(region.strip(), autoescape=True))
     if since:
         filters.append(Listing.event_at >= since)
-    if query:
-        term = f"%{query.strip()}%"
-        filters.append(or_(Listing.title.ilike(term), Listing.description.ilike(term)))
+    ranking = []
+    if query and query.strip():
+        match, ranking = text_search(query, db.get_bind().dialect.name)
+        filters.append(match)
 
     total = await db.scalar(select(func.count(Listing.id)).where(*filters)) or 0
     result = await db.scalars(
         select(Listing)
         .where(*filters)
         .options(selectinload(Listing.media))
-        .order_by(Listing.published_at.desc())
+        .order_by(*ranking, Listing.published_at.desc(), Listing.id)
         .offset(offset)
         .limit(limit)
     )
@@ -283,11 +285,15 @@ async def describe_with_ai(payload: AIDescribeRequest, db: DB, user: CurrentUser
 
 @router.post("/ai/search", response_model=list[PhotoSearchOut])
 async def search_by_photo(payload: AIPhotoSearchRequest, db: DB, user: CurrentUser) -> list[PhotoSearchOut]:
-    if not await rate_limit(f"rate:photo-search:{user.id}", 120, 3600):
-        raise HTTPException(status_code=429, detail="Лимит поиска по фото исчерпан")
     media = await db.get(MediaObject, payload.media_id)
     if not media or media.owner_id != user.id or not media.mime_type.startswith("image/"):
         raise HTTPException(status_code=404, detail="Фотография не найдена")
+    if media.status in {"rejected", "blocked"}:
+        raise HTTPException(422, "Фотография не прошла проверку. Загрузите другое фото.")
+    if media.status != "ready":
+        raise HTTPException(409, "Фотография ещё обрабатывается. Поиск начнётся после проверки.")
+    if not await rate_limit(f"rate:photo-search:{user.id}", 120, 3600):
+        raise HTTPException(status_code=429, detail="Лимит поиска по фото исчерпан")
     if media.embedding is None:
         image_url = storage.presign_download(media.object_key, internal=True)
         media.embedding = await ai_service.image_embedding(image_url)
@@ -296,37 +302,38 @@ async def search_by_photo(payload: AIPhotoSearchRequest, db: DB, user: CurrentUs
     if media.embedding is None:
         raise HTTPException(status_code=503, detail="Визуальный поиск временно недоступен")
 
-    distance = MediaObject.embedding.cosine_distance(media.embedding).label("distance")
+    # Rank one best photo per listing before limiting, so duplicates cannot hide results.
+    matches = select(
+        MediaObject.listing_id.label("listing_id"),
+        func.min(MediaObject.embedding.cosine_distance(media.embedding)).label("distance"),
+    ).where(
+        MediaObject.status == "ready", MediaObject.embedding.is_not(None),
+        MediaObject.listing_id.is_not(None), MediaObject.id != media.id,
+    ).group_by(MediaObject.listing_id).subquery()
     filters = [
         Listing.status == "active",
         Listing.moderation_status.in_(["approved", "auto_approved"]),
-        MediaObject.embedding.is_not(None),
-        MediaObject.id != media.id,
     ]
     if payload.target_kind:
         filters.append(Listing.kind == payload.target_kind)
     if payload.category:
         filters.append(func.lower(Listing.category).in_(category_values(payload.category)))
     if payload.region:
-        filters.append(Listing.public_region.ilike(f"%{payload.region}%"))
+        filters.append(Listing.public_region.icontains(payload.region.strip(), autoescape=True))
+    if payload.since:
+        filters.append(Listing.event_at >= payload.since)
     rows = await db.execute(
-        select(Listing, distance)
-        .join(MediaObject, MediaObject.listing_id == Listing.id)
+        select(Listing, matches.c.distance)
+        .join(matches, matches.c.listing_id == Listing.id)
         .where(*filters)
         .options(selectinload(Listing.media))
-        .order_by(distance)
-        .limit(payload.limit * 3)
+        .order_by(matches.c.distance, Listing.id)
+        .limit(payload.limit)
     )
     output: list[PhotoSearchOut] = []
-    seen: set[UUID] = set()
     for listing, raw_distance in rows.all():
-        if listing.id in seen:
-            continue
-        seen.add(listing.id)
         visual_score = round(max(0.0, 1.0 - float(raw_distance)) * 100, 2)
         output.append(PhotoSearchOut(listing=listing_out(listing), visual_score=visual_score))
-        if len(output) == payload.limit:
-            break
     return output
 
 
