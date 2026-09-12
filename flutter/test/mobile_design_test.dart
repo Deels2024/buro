@@ -26,10 +26,12 @@ http.Response _json(Object? data) => http.Response(jsonEncode(data), 200,
   headers: {'content-type':'application/json; charset=utf-8'});
 
 Future<http.Response> _handle(http.Request request) async {
-  if (request.url.path == '/v1/listings') return _json({'total':1, 'limit':24, 'offset':0, 'items':[
+  if (request.url.path == '/v1/listings') {
+    return _json({'total':1, 'limit':24, 'offset':0, 'items':[
     {'id':'preview-listing', 'kind':'found', 'title':'Чёрный рюкзак', 'category':'bags',
       'public_region':'Санкт-Петербург', 'event_at':'2026-09-12T12:00:00Z', 'media':<JsonMap>[]},
-  ]});
+    ]});
+  }
   if (request.url.path == '/v1/ads/current') return _json(null);
   if (request.url.path == '/v1/auth/request-code') return _json({'retry_after':60});
   return _json(<JsonMap>[]);
