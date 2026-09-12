@@ -10,12 +10,13 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: production-buro
-  cancel-in-progress: false
-
 jobs:
   deploy:
+    # Serialize server changes; a later diagnostics approval must not hold this lock.
+    # The legacy workflow-level group is retired after its deployment completed.
+    concurrency:
+      group: production-buro-deploy
+      cancel-in-progress: false
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event.workflow_run.conclusion == 'success' &&
