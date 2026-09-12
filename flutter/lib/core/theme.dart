@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 
 abstract final class BureauColors {
-  static const blue = Color(0xFF1769FF);
-  static const blueDark = Color(0xFF0D55E8);
-  static const blueSoft = Color(0xFFEAF2FF);
-  static const navy = Color(0xFF0B1F3A);
-  static const slate = Color(0xFF64748B);
-  static const muted = Color(0xFF98A4B7);
-  static const line = Color(0xFFDCE4EE);
-  static const canvas = Color(0xFFF4F7FB);
-  static const webCanvas = Color(0xFFE8EEF7);
-  static const green = Color(0xFF09A875);
-  static const greenSoft = Color(0xFFE6F8F1);
+  static const blue = Color(0xFF245EE8);
+  static const blueDark = Color(0xFF174BC3);
+  static const blueSoft = Color(0xFFECF2FF);
+  static const navy = Color(0xFF152B40);
+  static const slate = Color(0xFF526477);
+  static const muted = Color(0xFF68788B);
+  static const line = Color(0xFFDFE7EE);
+  static const canvas = Color(0xFFF7F9FC);
+  static const webCanvas = Color(0xFFEDF1F6);
+  static const green = Color(0xFF087F64);
+  static const greenSoft = Color(0xFFEAF6F0);
   static const amber = Color(0xFFD98500);
   static const amberSoft = Color(0xFFFFF4DF);
   static const red = Color(0xFFE14655);
@@ -32,44 +32,49 @@ abstract final class BureauTheme {
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor: BureauColors.canvas,
+      fontFamily: 'BureauSans',
       splashFactory: InkSparkle.splashFactory,
       textTheme: const TextTheme(
         displaySmall: TextStyle(
           color: BureauColors.navy,
-          fontSize: 36,
-          height: 1.05,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -1.3,
+          fontSize: 32,
+          height: 1.16,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.8,
         ),
         headlineSmall: TextStyle(
           color: BureauColors.navy,
           fontSize: 26,
-          height: 1.12,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.7,
+          height: 1.22,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.5,
         ),
         titleLarge: TextStyle(
           color: BureauColors.navy,
           fontSize: 20,
-          fontWeight: FontWeight.w800,
+          height: 1.3,
+          fontWeight: FontWeight.w700,
           letterSpacing: -0.3,
         ),
         titleMedium: TextStyle(
           color: BureauColors.navy,
-          fontSize: 15,
-          fontWeight: FontWeight.w800,
+          fontSize: 16,
+          height: 1.35,
+          fontWeight: FontWeight.w600,
         ),
         bodyLarge: TextStyle(
           color: BureauColors.navy,
-          fontSize: 15,
-          height: 1.45,
+          fontSize: 16,
+          height: 1.5,
         ),
         bodyMedium: TextStyle(
           color: BureauColors.slate,
-          fontSize: 13,
-          height: 1.45,
+          fontSize: 14,
+          height: 1.5,
         ),
-        labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+        bodySmall: TextStyle(color: BureauColors.slate, fontSize: 12, height: 1.5),
+        labelLarge: TextStyle(fontSize: 15, height: 1.3, fontWeight: FontWeight.w600),
+        labelMedium: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       ),
       cardTheme: CardThemeData(
         margin: EdgeInsets.zero,
@@ -83,10 +88,13 @@ abstract final class BureauTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
-        hintStyle: const TextStyle(color: BureauColors.muted),
+        hintStyle: const TextStyle(color: BureauColors.muted, fontSize: 16, fontWeight: FontWeight.w400),
+        labelStyle: const TextStyle(color: BureauColors.slate, fontSize: 14),
+        helperStyle: const TextStyle(color: BureauColors.slate, fontSize: 12, height: 1.45),
+        errorStyle: const TextStyle(fontSize: 12, height: 1.45),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 18,
-          vertical: 17,
+          vertical: 16,
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(18),
@@ -108,7 +116,7 @@ abstract final class BureauTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(17),
           ),
-          textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+          textStyle: const TextStyle(fontFamily: 'BureauSans', fontWeight: FontWeight.w600, fontSize: 15),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -119,11 +127,11 @@ abstract final class BureauTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(17),
           ),
-          textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+          textStyle: const TextStyle(fontFamily: 'BureauSans', fontWeight: FontWeight.w600, fontSize: 15),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 72,
+        height: 76,
         elevation: 0,
         backgroundColor: Colors.white,
         indicatorColor: BureauColors.blueSoft,
@@ -132,12 +140,24 @@ abstract final class BureauTheme {
             color: states.contains(WidgetState.selected)
                 ? BureauColors.blue
                 : BureauColors.muted,
-            fontSize: 11,
+            fontFamily: 'BureauSans',
+            fontSize: 12,
             fontWeight: states.contains(WidgetState.selected)
-                ? FontWeight.w800
-                : FontWeight.w600,
+                ? FontWeight.w700
+                : FontWeight.w500,
           ),
         ),
+      ),
+      textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(
+        minimumSize: const Size(44, 44),
+        textStyle: const TextStyle(fontFamily: 'BureauSans', fontSize: 14, fontWeight: FontWeight.w600),
+      )),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: BureauColors.canvas,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: BureauColors.navy,
+        centerTitle: false,
+        toolbarHeight: 68,
       ),
     );
   }

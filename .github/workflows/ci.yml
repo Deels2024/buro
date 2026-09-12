@@ -82,7 +82,7 @@ jobs:
           name: flutter-lock
           path: flutter/pubspec.lock
       - run: flutter analyze
-      - run: flutter test
+      - run: flutter test --dart-define=BUREAU_CAPTURE_DESIGN=true
       - run: flutter build web --release --base-href=/app/ --dart-define=BUREAU_API_URL=https://edinburo.ru/v1
       - run: node tool/validate_project.js
 

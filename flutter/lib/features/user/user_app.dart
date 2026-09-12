@@ -1,4 +1,5 @@
 import '../../core/location_editor.dart';
+import '../../core/brand_artwork.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -88,17 +89,16 @@ class _OnboardingPageState extends State<OnboardingPage> {
                         'БН',
                         style: TextStyle(
                           color: Colors.white,
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 11),
-                  Text(
+                  Expanded(child: Text(
                     'Бюро находок',
                     style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const Spacer(),
+                  )),
                   TextButton(
                     onPressed: _openAuth,
                     child: const Text('Пропустить'),
@@ -113,55 +113,28 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 onPageChanged: (value) => setState(() => _index = value),
                 itemBuilder: (context, index) {
                   final slide = _slides[index];
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Container(
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: slide.$5,
-                              borderRadius: BorderRadius.circular(32),
-                            ),
-                            child: Center(
-                              child: Container(
-                                width: 150,
-                                height: 150,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(42),
-                                ),
-                                child: Icon(
-                                  slide.$1,
-                                  color: slide.$4,
-                                  size: 70,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        BureauPill(
-                          '${index + 1} / ${_slides.length}',
-                          color: slide.$4,
-                          background: slide.$5,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          slide.$2,
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          slide.$3,
-                          style: Theme.of(context).textTheme.bodyLarge
-                              ?.copyWith(color: BureauColors.slate),
-                        ),
-                      ],
-                    ),
-                  );
+                  return LayoutBuilder(builder: (context, constraints) {
+                    final artSize = (constraints.maxHeight * .42).clamp(100.0, 250.0).toDouble();
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                      child: Center(child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 520),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Center(child: BureauIllustration(
+                            artwork: index == 1 ? BureauArtwork.handover : BureauArtwork.belongings,
+                            size: artSize,
+                          )),
+                          const SizedBox(height: 24),
+                          BureauPill('${index + 1} / ${_slides.length}', color: slide.$4, background: slide.$5),
+                          const SizedBox(height: 16),
+                          Text(slide.$2, style: Theme.of(context).textTheme.headlineSmall),
+                          const SizedBox(height: 12),
+                          Text(slide.$3, style: Theme.of(context).textTheme.bodyLarge
+                            ?.copyWith(color: BureauColors.slate)),
+                        ]),
+                      )),
+                    );
+                  });
                 },
               ),
             ),
@@ -203,7 +176,9 @@ class _AuthPageState extends State<AuthPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 28),
+          const SizedBox(height: 12),
+          const ReturnWelcome(),
+          const SizedBox(height: 24),
           TextField(
             controller: _phone,
             keyboardType: TextInputType.phone,
@@ -244,7 +219,7 @@ class _AuthPageState extends State<AuthPage> {
             textAlign: TextAlign.center,
             style: Theme.of(
               context,
-            ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+            ).textTheme.bodyMedium?.copyWith(fontSize: 12),
           ),
         ],
       ),
@@ -488,7 +463,6 @@ class _UserShellState extends State<UserShell> {
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key, required this.onSearch});
-
   final VoidCallback onSearch;
 
   @override
@@ -513,162 +487,105 @@ class _HomeViewState extends State<HomeView> {
     _future ??= _load();
   }
 
-  void _refresh() => setState(() => _future = _load());
+  Future<void> _refresh() async {
+    final future = _load();
+    setState(() => _future = future);
+    await future;
+  }
 
   @override
   Widget build(BuildContext context) {
     final user = AppScope.of(context).currentUser ?? const <String, dynamic>{};
+    final name = user['display_name']?.toString().trim() ?? '';
     return SafeArea(
-      child: RefreshIndicator(
-        onRefresh: () async => _refresh(),
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 28),
-          children: [
-            Container(
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [BureauColors.blueDark, Color(0xFF277BFF)],
-                ),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: Colors.white,
-                        child: Text(
-                          _initials(user['display_name']?.toString()),
-                          style: const TextStyle(
-                            color: BureauColors.blue,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Здравствуйте, ${user['display_name'] ?? 'пользователь'}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () =>
-                            pushPage(context, const NotificationsPage()),
-                        icon: const Icon(
-                          Icons.notifications_none_rounded,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 820),
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+              children: [
+                Row(children: [
+                  Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(color: BureauColors.blue,
+                      borderRadius: BorderRadius.circular(15)),
+                    child: const Center(child: Text('БН', textScaler: TextScaler.noScaling, style: TextStyle(
+                      color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700))),
                   ),
-                  const SizedBox(height: 28),
-                  Text(
-                    'Что вы хотите\nвернуть?',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.displaySmall?.copyWith(color: Colors.white),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    readOnly: true,
-                    onTap: widget.onSearch,
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search_rounded),
-                      hintText: 'Фото, описание или место',
-                      border: InputBorder.none,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _QuickAction(
-                          icon: Icons.search_off_rounded,
-                          title: 'Я потерял',
-                          subtitle: 'Создать пропажу',
-                          color: BureauColors.blue,
-                          soft: BureauColors.blueSoft,
-                          onTap: () => pushPage(
-                            context,
-                            const CreateFlowPage(initialFound: false),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _QuickAction(
-                          icon: Icons.volunteer_activism_rounded,
-                          title: 'Я нашёл',
-                          subtitle: 'Помочь вернуть',
-                          color: BureauColors.green,
-                          soft: BureauColors.greenSoft,
-                          onTap: () => pushPage(
-                            context,
-                            const CreateFlowPage(initialFound: true),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SectionTitle('Последние объявления'),
-                  FutureBuilder<List<dynamic>>(
-                    future: _future,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState != ConnectionState.done) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        return NoticeCard(
-                          apiErrorText(snapshot.error!),
-                          color: BureauColors.red,
-                          background: BureauColors.redSoft,
-                        );
-                      }
-                      final response = snapshot.data!;
-                      final items = List<JsonMap>.from(
-                        (response[0] as JsonMap)['items'] as List,
-                      );
-                      final ad = response[2] as JsonMap?;
-                      return Column(
-                        children: [
-                          for (
-                            var index = 0;
-                            index < items.length;
-                            index++
-                          ) ...[
-                            _ListingCard(listing: items[index]),
-                            const SizedBox(height: 12),
-                            if (index == 0 && ad != null) ...[
-                              _LiveAdCard(ad: ad, placement: 'home_feed'),
-                              const SizedBox(height: 12),
-                            ],
-                          ],
-                          if (items.isEmpty)
-                            const NoticeCard(
-                              'Активных публикаций пока нет. Создайте первую запись.',
-                            ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Бюро находок', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 3),
+                    Text(name.isEmpty ? 'Здравствуйте!' : 'Здравствуйте, $name',
+                      maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall),
+                  ])),
+                  IconButton(tooltip: 'Уведомления',
+                    onPressed: () => pushPage(context, const NotificationsPage()),
+                    icon: const Icon(Icons.notifications_none_rounded, color: BureauColors.navy)),
+                ]),
+                const SizedBox(height: 22),
+                DiscoveryHero(onSearch: widget.onSearch),
+                const SizedBox(height: 16),
+                LayoutBuilder(builder: (context, constraints) {
+                  final actions = [
+                    _QuickAction(icon: Icons.search_off_rounded, title: 'Я потерял',
+                      subtitle: 'Рассказать о пропаже', color: BureauColors.blue,
+                      onTap: () => pushPage(context, const CreateFlowPage(initialFound: false))),
+                    _QuickAction(icon: Icons.volunteer_activism_outlined, title: 'Я нашёл',
+                      subtitle: 'Помочь вернуть вещь', color: BureauColors.green,
+                      onTap: () => pushPage(context, const CreateFlowPage(initialFound: true))),
+                  ];
+                  if (constraints.maxWidth < 300 || MediaQuery.textScalerOf(context).scale(16) > 20) {
+                    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      actions[0], const SizedBox(height: 12), actions[1],
+                    ]);
+                  }
+                  return IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Expanded(child: actions[0]), const SizedBox(width: 12), Expanded(child: actions[1]),
+                  ]));
+                }),
+                const SizedBox(height: 16),
+                const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(Icons.shield_outlined, color: BureauColors.green, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Контакты и точный адрес не публикуются.',
+                    style: TextStyle(color: BureauColors.slate, fontSize: 12, height: 1.45))),
+                ]),
+                const SectionTitle('Последние объявления'),
+                FutureBuilder<List<dynamic>>(
+                  future: _future,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Padding(padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator()));
+                    }
+                    if (snapshot.hasError) {
+                      return NoticeCard(apiErrorText(snapshot.error!),
+                        color: BureauColors.red, background: BureauColors.redSoft);
+                    }
+                    final response = snapshot.data!;
+                    final items = List<JsonMap>.from((response[0] as JsonMap)['items'] as List);
+                    final ad = response[2] as JsonMap?;
+                    return Column(children: [
+                      for (var index = 0; index < items.length; index++) ...[
+                        _ListingCard(listing: items[index]),
+                        const SizedBox(height: 12),
+                        if (index == 0 && ad != null) ...[
+                          _LiveAdCard(ad: ad, placement: 'home_feed'),
+                          const SizedBox(height: 12),
                         ],
-                      );
-                    },
-                  ),
-                ],
-              ),
+                      ],
+                      if (items.isEmpty) const NoticeCard(
+                        'Активных публикаций пока нет. Создайте первую запись.'),
+                    ]);
+                  },
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -676,44 +593,25 @@ class _HomeViewState extends State<HomeView> {
 }
 
 class _QuickAction extends StatelessWidget {
-  const _QuickAction({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.color,
-    required this.soft,
-    required this.onTap,
-  });
+  const _QuickAction({required this.icon, required this.title,
+    required this.subtitle, required this.color, required this.onTap});
   final IconData icon;
   final String title;
   final String subtitle;
   final Color color;
-  final Color soft;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => SoftCard(
     onTap: onTap,
-    color: soft,
-    borderColor: soft,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: color, size: 28),
-        const SizedBox(height: 22),
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(color: color, fontSize: 17),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 10),
-        ),
-      ],
-    ),
+    padding: const EdgeInsets.all(16),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Icon(icon, color: color, size: 26),
+      const SizedBox(height: 14),
+      Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color)),
+      const SizedBox(height: 5),
+      Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+    ]),
   );
 }
 
@@ -1209,7 +1107,7 @@ class ProfileView extends StatelessWidget {
                     _initials(user['display_name']?.toString()),
                     style: const TextStyle(
                       color: BureauColors.blue,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -1226,7 +1124,7 @@ class ProfileView extends StatelessWidget {
                         '${user['phone_masked'] ?? ''} · ${user['status'] ?? ''}',
                         style: Theme.of(
                           context,
-                        ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+                        ).textTheme.bodyMedium?.copyWith(fontSize: 12),
                       ),
                     ],
                   ),
@@ -1483,7 +1381,7 @@ class MatchExplanationPage extends StatelessWidget {
                   '${matchPercent(row.value)}%',
                   style: const TextStyle(
                     color: BureauColors.green,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
@@ -2135,7 +2033,7 @@ class _ListingCard extends StatelessWidget {
                 '${listing['public_region'] ?? ''} · ${_shortDate(listing['event_at'])}',
                 style: Theme.of(
                   context,
-                ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+                ).textTheme.bodyMedium?.copyWith(fontSize: 12),
               ),
               if (score != null) ...[
                 const SizedBox(height: 8),

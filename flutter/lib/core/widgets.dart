@@ -24,19 +24,26 @@ class BureauPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: (subtitle == null
+            ? MediaQuery.textScalerOf(context).scale(28) + 24
+            : MediaQuery.textScalerOf(context).scale(26) +
+                MediaQuery.textScalerOf(context).scale(18) * 2 + 12).clamp(68.0, double.infinity).toDouble(),
         backgroundColor: BureauColors.canvas,
         surfaceTintColor: Colors.transparent,
         titleSpacing: Navigator.canPop(context) ? 0 : 20,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleLarge),
             if (subtitle != null)
               Text(
                 subtitle!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: Theme.of(
                   context,
-                ).textTheme.bodyMedium?.copyWith(fontSize: 11),
+                ).textTheme.bodySmall,
               ),
           ],
         ),
@@ -126,7 +133,8 @@ class BureauPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      constraints: BoxConstraints(minHeight: icon == null ? 32 : 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(99),
@@ -135,7 +143,7 @@ class BureauPill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 13, color: color),
+            Icon(icon, size: 16, color: color),
             const SizedBox(width: 5),
           ],
           Flexible(
@@ -143,8 +151,9 @@ class BureauPill extends StatelessWidget {
               label,
               style: TextStyle(
                 color: color,
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
+                fontSize: 12,
+                height: 1.3,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -244,7 +253,7 @@ class MetricCard extends StatelessWidget {
             label,
             style: Theme.of(
               context,
-            ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+            ).textTheme.bodyMedium?.copyWith(fontSize: 12),
           ),
         ],
       ),
@@ -284,7 +293,7 @@ class NoticeCard extends StatelessWidget {
               text,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: color, fontSize: 11),
+              ).textTheme.bodyMedium?.copyWith(color: color, fontSize: 13),
             ),
           ),
         ],
@@ -389,7 +398,7 @@ class LostItemCard extends StatelessWidget {
                   meta,
                   style: Theme.of(
                     context,
-                  ).textTheme.bodyMedium?.copyWith(fontSize: 11),
+                  ).textTheme.bodyMedium?.copyWith(fontSize: 12),
                 ),
                 const SizedBox(height: 12),
                 BureauPill(
@@ -459,7 +468,7 @@ class NativeAdCard extends StatelessWidget {
                       'Безопасное хранение и передача вещей',
                       style: Theme.of(
                         context,
-                      ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+                      ).textTheme.bodyMedium?.copyWith(fontSize: 12),
                     ),
                   ],
                 ),
@@ -516,7 +525,7 @@ class SettingRow extends StatelessWidget {
                   subtitle,
                   style: Theme.of(
                     context,
-                  ).textTheme.bodyMedium?.copyWith(fontSize: 10),
+                  ).textTheme.bodyMedium?.copyWith(fontSize: 12),
                 ),
               ],
             ),
