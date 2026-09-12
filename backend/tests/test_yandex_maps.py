@@ -95,3 +95,66 @@ async def test_release_probe_checks_real_results_without_logging_keys(monkeypatc
     assert '"yandex_maps": "failed"' in output if rejected else '"yandex_maps": "ok"' in output
     assert "private-test-key" not in output
     assert request.await_count == 2
+
+
+@pytest.mark.parametrize("route", ["auto", "ipv4", "proxy"])
+async def test_maps_route_is_explicit_and_ignores_environment_proxy(monkeypatch, route):
+    monkeypatch.setenv("HTTPS_PROXY", "http://unrelated.invalid:8080")
+    monkeypatch.setattr(yandex_maps.settings, "yandex_suggest_api_key", "test-private-key")
+    monkeypatch.setattr(yandex_maps.settings, "openai_proxy_address", "proxy.example")
+    monkeypatch.setattr(yandex_maps, "openai_proxy_url", lambda _: "http://user:password@proxy.example:8080")
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        assert request.url.host == "suggest-maps.yandex.ru"
+        assert request.url.params["apikey"] == "test-private-key"
+        return httpx.Response(200, json={"results": []})
+
+    transport = Mock(side_effect=lambda **kwargs: httpx.MockTransport(respond))
+    monkeypatch.setattr(yandex_maps.httpx, "AsyncHTTPTransport", transport)
+    assert await yandex_maps.provider_request("suggest", {"text": "Москва"}, route=route) == {"results": []}
+    assert len(calls) == 1
+    assert transport.call_args.kwargs == {
+        "proxy": "http://user:password@proxy.example:8080" if route == "proxy" else None,
+        "local_address": "0.0.0.0" if route == "ipv4" else None,
+        "retries": 0, "trust_env": False,
+    }
+
+
+@pytest.mark.parametrize("body,reason", [
+    ("Invalid api key: test-private-key", "invalid_key"),
+    ("IP address is not allowed for test-private-key", "ip_restricted"),
+    ("Referer is not allowed for test-private-key", "referer_restricted"),
+    ("Forbidden test-private-key", "access_denied"),
+])
+async def test_access_rejection_is_classified_without_retry_or_key_disclosure(monkeypatch, body, reason):
+    monkeypatch.setattr(yandex_maps.settings, "yandex_suggest_api_key", "test-private-key")
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(403, text=body)
+
+    monkeypatch.setattr(yandex_maps.httpx, "AsyncHTTPTransport", lambda **kwargs: httpx.MockTransport(respond))
+    with pytest.raises(yandex_maps.MapsProviderError) as exc:
+        await yandex_maps.provider_request("suggest", {"text": "Москва"})
+    assert exc.value.reason == reason
+    assert exc.value.provider_status == 403
+    assert "test-private-key" not in str(exc.value)
+    assert len(calls) == 1
+
+
+async def test_network_timeout_is_not_reported_as_a_bad_key(monkeypatch):
+    monkeypatch.setattr(yandex_maps.settings, "yandex_suggest_api_key", "test-private-key")
+
+    def respond(request):
+        raise httpx.ConnectTimeout("test-private-key in private URL", request=request)
+
+    monkeypatch.setattr(yandex_maps.httpx, "AsyncHTTPTransport", lambda **kwargs: httpx.MockTransport(respond))
+    with pytest.raises(yandex_maps.MapsProviderError) as exc:
+        await yandex_maps.provider_request("suggest", {"text": "Москва"})
+    assert exc.value.reason == "connect_timeout"
+    assert exc.value.provider_status is None
+    assert "MAPS_TIMEOUT" in exc.value.detail
+    assert "test-private-key" not in str(exc.value)

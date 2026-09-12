@@ -71,3 +71,89 @@ jobs:
             acceptance.json
           if-no-files-found: ignore
           retention-days: 14
+
+  maps-diagnostics:
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 3
+    permissions:
+      id-token: write
+    steps:
+      - name: Compare Yandex connection routes without exposing keys
+        shell: python
+        env:
+          EXPECTED_RELEASE: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          import json
+          import os
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import quote
+          from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+          class RejectRedirects(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          def fail(message):
+              print(f"::error::{message}")
+              raise SystemExit(1)
+
+          endpoint = "https://edinburo.ru/v1/internal/deployment/yandex-diagnostics"
+          opener = build_opener(RejectRedirects)
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
+          separator = "&" if "?" in url else "?"
+          request = Request(url + separator + "audience=" + quote(endpoint, safe=""), headers={
+              "Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"],
+          })
+          try:
+              with opener.open(request, timeout=20) as response:
+                  raw = response.read(65537)
+              if len(raw) > 65536:
+                  fail("OIDC response is too large.")
+              token = json.loads(raw)["value"]
+              request = Request(endpoint, data=b"", method="POST", headers={
+                  "Authorization": "Bearer " + token,
+                  "Accept": "application/json",
+                  "Cache-Control": "no-store",
+              })
+              del token
+              with opener.open(request, timeout=50) as response:
+                  raw = response.read(16385)
+          except HTTPError as error:
+              fail(f"Maps diagnostics returned HTTP {error.code}.")
+          except (URLError, TimeoutError, json.JSONDecodeError, KeyError):
+              fail("Maps diagnostics connection or authentication failed.")
+          if len(raw) > 16384:
+              fail("Maps diagnostics response is too large.")
+          result = json.loads(raw)
+          if result.get("release_sha") != os.environ["EXPECTED_RELEASE"]:
+              fail("Maps diagnostics ran on an unexpected release.")
+          allowed_reasons = {
+              "ok", "empty_result", "referer_restricted", "ip_restricted", "invalid_key",
+              "access_denied", "rate_limit", "proxy_config", "missing_key", "connect_timeout",
+              "read_timeout", "timeout", "provider_http_error", "network_error", "invalid_response",
+              "local_budget", "invalid_result", "total_timeout", "diagnostic_error",
+          }
+          checks = result.get("checks", [])
+          if not isinstance(checks, list) or len(checks) > 6:
+              fail("Unexpected maps diagnostic checks.")
+          for check in checks:
+              if (check.get("service") not in {"geocoder", "suggest"}
+                  or check.get("route") not in {"auto", "ipv4", "proxy"}
+                  or check.get("reason") not in allowed_reasons
+                  or not isinstance(check.get("ok"), bool)
+                  or check.get("http_status") is not None and not isinstance(check["http_status"], int)):
+                  fail("Unexpected maps diagnostic result.")
+          safe = {
+              "release_sha": result["release_sha"],
+              "application_route": "ipv4",
+              "configured": {name: result.get("configured", {}).get(name) is True
+                             for name in ("javascript", "geocoder", "suggest")},
+              "checks": [{key: check[key] for key in ("service", "route", "ok", "http_status", "reason")}
+                         for check in checks],
+          }
+          print(json.dumps(safe))
+          working = {check["service"] for check in checks if check["route"] == "ipv4" and check["ok"]}
+          if working != {"geocoder", "suggest"}:
+              print("::warning::Yandex address services need attention; see the safe route comparison above.")

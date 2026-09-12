@@ -14,9 +14,32 @@ from app.services.github_oidc import (
     GitHubOIDCUnavailableError,
     verify_github_oidc_token,
 )
+from app.services.yandex_diagnostics import compare_routes
 
 router = APIRouter(tags=["internal-deployment"])
 github_bearer = HTTPBearer(auto_error=False)
+
+
+async def trusted_maps_diagnostics(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(github_bearer)],
+) -> dict[str, Any]:
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(401, "GitHub Actions authentication is required", headers={"WWW-Authenticate": "Bearer"})
+    try:
+        return await verify_github_oidc_token(credentials.credentials, yandex_diagnostics=True)
+    except GitHubOIDCAuthenticationError:
+        raise HTTPException(401, "GitHub Actions authentication failed", headers={"WWW-Authenticate": "Bearer"}) from None
+    except GitHubOIDCUnavailableError:
+        raise HTTPException(503, "GitHub Actions authentication is temporarily unavailable") from None
+
+
+@router.post("/yandex-diagnostics", include_in_schema=False)
+async def production_maps_diagnostics(
+    response: Response,
+    _: Annotated[dict[str, Any], Depends(trusted_maps_diagnostics)],
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    return await compare_routes()
 
 
 async def trusted_github_workflow(

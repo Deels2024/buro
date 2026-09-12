@@ -68,3 +68,28 @@ def test_internal_configuration_rejects_other_content_types(monkeypatch) -> None
 
     assert response.status_code == 415
     configure.assert_not_awaited()
+
+
+def test_maps_diagnostics_cannot_be_called_without_a_trusted_workflow(monkeypatch):
+    compare = AsyncMock()
+    monkeypatch.setattr(internal_deployment, "compare_routes", compare)
+    with TestClient(app) as client:
+        response = client.post("/v1/internal/deployment/yandex-diagnostics")
+    assert response.status_code == 401
+    compare.assert_not_awaited()
+
+
+def test_maps_diagnostics_uses_separate_authentication_and_returns_only_report(monkeypatch):
+    verify = AsyncMock(return_value={"repository": "Deels2024/buro"})
+    report = {"application_route": "ipv4", "checks": [{"service": "suggest", "reason": "invalid_key"}]}
+    compare = AsyncMock(return_value=report)
+    monkeypatch.setattr(internal_deployment, "verify_github_oidc_token", verify)
+    monkeypatch.setattr(internal_deployment, "compare_routes", compare)
+    with TestClient(app) as client:
+        response = client.post("/v1/internal/deployment/yandex-diagnostics",
+                               headers={"Authorization": "Bearer signed-diagnostic-token"})
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == report
+    verify.assert_awaited_once_with("signed-diagnostic-token", yandex_diagnostics=True)
+    compare.assert_awaited_once()
