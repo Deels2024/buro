@@ -1,5 +1,6 @@
+from app.core.security import decrypt_json
 from app.db.models import Listing, MediaObject
-from app.schemas import ListingOut, MediaOut
+from app.schemas import ListingOut, ManagedListingOut, MediaOut
 from app.services.categories import normalize_category
 from app.services.storage import storage
 
@@ -42,4 +43,12 @@ def listing_out(listing: Listing, *, private: bool = False) -> ListingOut:
         media=[media_out(item) for item in listing.media if item.status == "ready" or (private and item.status == "processing")],
         created_at=listing.created_at,
         updated_at=listing.updated_at,
+    )
+
+
+def managed_listing_out(listing: Listing) -> ManagedListingOut:
+    # The caller must first authorize management of this listing.
+    return ManagedListingOut(
+        **listing_out(listing, private=True).model_dump(),
+        location=decrypt_json(listing.exact_location_cipher) if listing.exact_location_cipher else None,
     )

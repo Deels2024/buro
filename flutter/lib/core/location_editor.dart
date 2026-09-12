@@ -99,11 +99,13 @@ class _MapsTextFieldState extends State<MapsTextField> {
 }
 
 class LocationEditor extends StatefulWidget {
-  const LocationEditor({super.key, required this.region, required this.address, required this.onPoint, this.selected});
+  const LocationEditor({super.key, required this.region, required this.address, required this.onPoint,
+    this.selected, this.onResolvingChanged});
   final TextEditingController region;
   final TextEditingController address;
   final LatLng? selected;
   final ValueChanged<LatLng?> onPoint;
+  final ValueChanged<bool>? onResolvingChanged;
   @override
   State<LocationEditor> createState() => _LocationEditorState();
 }
@@ -116,6 +118,7 @@ class _LocationEditorState extends State<LocationEditor> {
     ++_version;
     widget.onPoint(null);
     setState(() { _resolving = false; _message = null; });
+    widget.onResolvingChanged?.call(false);
   }
   Future<void> _resolve({JsonMap? suggestion, LatLng? point, bool cityOnly = false}) async {
     final version = ++_version;
@@ -124,6 +127,7 @@ class _LocationEditorState extends State<LocationEditor> {
     if (point != null || cityOnly) widget.address.clear();
     if (point != null) widget.region.clear();
     setState(() { _resolving = true; _message = null; });
+    widget.onResolvingChanged?.call(true);
     try {
       final uri = suggestion?['uri']?.toString() ?? '';
       final result = await AppScope.of(context, listen: false).api.request('POST', '/maps/resolve',
@@ -140,7 +144,10 @@ class _LocationEditorState extends State<LocationEditor> {
       if (!mounted || version != _version) return;
       setState(() => _message = error is BureauApiException ? error.detail : 'Введите город и адрес вручную.');
     } finally {
-      if (mounted && version == _version) setState(() => _resolving = false);
+      if (mounted && version == _version) {
+        setState(() => _resolving = false);
+        widget.onResolvingChanged?.call(false);
+      }
     }
   }
   @override
