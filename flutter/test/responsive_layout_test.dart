@@ -40,10 +40,11 @@ void main() {
       _viewport(tester, Size(width, 740));
       const action = 'Подтвердить передачу владельцу';
       const feature = 'Красная молния на внутреннем кармане и длинный ремень через плечо';
+      final completion = Completer<void>();
       await tester.pumpWidget(_app(BureauPage(
         title: 'Вещь',
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          ApiButton(label: action, icon: Icons.check, onPressed: () async {}),
+          ApiButton(label: action, icon: Icons.check, onPressed: () => completion.future),
           const SizedBox(height: 20),
           const Wrap(children: [BureauPill(feature)]),
         ]),
@@ -56,6 +57,14 @@ void main() {
       }
       expect(tester.getRect(find.byType(FilledButton)).contains(
         tester.getRect(find.text(action)).bottomRight), isTrue);
+      final initialSize = tester.getSize(find.byType(FilledButton));
+      await tester.tap(find.byType(FilledButton));
+      await tester.pump();
+      expect(tester.getSize(find.byType(FilledButton)), initialSize);
+      expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
+      completion.complete();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
     });
   }
 
@@ -132,6 +141,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('Отмена'));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
@@ -154,3 +164,4 @@ void main() {
     controller.dispose();
   });
 }
+import 'dart:async';

@@ -535,3 +535,17 @@ class SettingRow extends StatelessWidget {
 void pushPage(BuildContext context, Widget page) {
   Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
 }
+
+Future<T?> showBureauDialog<T>({required BuildContext context, required WidgetBuilder builder}) async {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final route = DialogRoute<T>(
+    context: context,
+    builder: builder,
+    themes: InheritedTheme.capture(from: context, to: navigator.context),
+  );
+  final result = await navigator.push<T>(route);
+  // Callers may dispose form controllers only after the closing animation
+  // removes the dialog's fields from the widget tree.
+  await route.completed;
+  return result;
+}

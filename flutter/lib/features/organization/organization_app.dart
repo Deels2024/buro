@@ -622,7 +622,7 @@ class _OrgTeamPageState extends State<OrgTeamPage> {
     final api = AppScope.of(context, listen: false).api;
     final phone = TextEditingController(text: '+7');
     var role = 'operator';
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
@@ -948,7 +948,7 @@ class _OrganizationBranchesPageState extends State<OrganizationBranchesPage> {
     final api = AppScope.of(context, listen: false).api;
     final name = TextEditingController();
     final address = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Новый филиал'),
@@ -1074,7 +1074,7 @@ class _OrganizationSettingsPageState extends State<OrganizationSettingsPage> {
   Future<void> _createWebhook() async {
     final api = AppScope.of(context, listen: false).api;
     final url = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Новый вебхук'),

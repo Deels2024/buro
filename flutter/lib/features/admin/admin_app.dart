@@ -231,7 +231,7 @@ class _ModerationQueuePageState extends State<ModerationQueuePage> {
     final reason = TextEditingController(
       text: 'Публикация соответствует правилам',
     );
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
@@ -352,7 +352,7 @@ class _RiskAndDisputesPageState extends State<RiskAndDisputesPage> {
     final reason = TextEditingController(
       text: 'Требуется дополнительная проверка доказательств',
     );
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
@@ -673,7 +673,7 @@ class _AdsAdminPageState extends State<AdsAdminPage> {
     final body = TextEditingController();
     final url = TextEditingController(text: 'https://example.com');
     final erid = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showBureauDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Новая кампания'),
