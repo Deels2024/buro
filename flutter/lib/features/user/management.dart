@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/api_widgets.dart';
 import '../../core/production_widgets.dart';
+import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/app_controller.dart';
 import '../../data/bureau_api_client.dart';
@@ -58,27 +59,195 @@ class _EditListingPageState extends State<EditListingPage> {
   @override
   void dispose() { for (final c in [_title,_description,_region,_storage]) { c.dispose(); } super.dispose(); }
   @override
-  Widget build(BuildContext context) => BureauPage(title:'Моя публикация', child: _error != null ? Column(children:[NoticeCard(apiErrorText(_error!)),TextButton(onPressed:_load, child:const Text('Повторить'))]) : _listing == null ? const Center(child:CircularProgressIndicator()) : Column(crossAxisAlignment:CrossAxisAlignment.start, children:[
-    Text('${stateLabel(_listing!['status'])} · ${stateLabel(_listing!['moderation_status'])}'),
-    const SizedBox(height:16),
-    if (_media.isNotEmpty) ...[
-      PhotoGallery(media:_media),
-      Wrap(children:[for (var i=0;i<_media.length;i++) TextButton(onPressed:()=>setState(()=>_media.removeAt(i)), child:Text('Удалить фото ${i+1}'))]),
+  Widget build(BuildContext context) => BureauPage(
+    title: 'Моя публикация',
+    child: _error != null
+        ? Column(children: [
+            NoticeCard(apiErrorText(_error!)),
+            TextButton(onPressed: _load, child: const Text('Повторить')),
+          ])
+        : _listing == null
+            ? const Center(child: CircularProgressIndicator())
+            : ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      '${stateLabel(_listing!['status'])} · ${stateLabel(_listing!['moderation_status'])}',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 20),
+                    Text('Фотографии', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 12),
+                    if (_media.isNotEmpty) ...[
+                      for (var i = 0; i < _media.length; i++) ...[
+                        _ListingPhotoCard(
+                          media: _media[i],
+                          number: i + 1,
+                          onRemove: () => setState(() => _media.removeAt(i)),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ],
+                    OutlinedButton.icon(
+                      onPressed: _uploading || _media.length >= 9 ? null : _photos,
+                      icon: const Icon(Icons.add_a_photo_outlined),
+                      label: Text(_uploading ? 'Загружаем…' : 'Добавить фотографии'),
+                    ),
+                    const SizedBox(height: 28),
+                    _ListingEditorField(
+                      label: 'Название',
+                      child: TextField(
+                        controller: _title,
+                        minLines: 1,
+                        maxLines: 2,
+                        maxLength: 180,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(hintText: 'Что это за вещь?'),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _ListingEditorField(
+                      label: 'Описание без личных данных',
+                      child: TextField(
+                        controller: _description,
+                        minLines: 3,
+                        maxLines: 8,
+                        maxLength: 5000,
+                        decoration: const InputDecoration(hintText: 'Цвет, бренд и отличительные признаки'),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _ListingEditorField(
+                      label: 'Категория',
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _category,
+                        isExpanded: true,
+                        items: categoryLabels.entries.map((e) => DropdownMenuItem(
+                          value: e.key,
+                          child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        )).toList(),
+                        onChanged: (v) => setState(() => _category = v ?? 'other'),
+                        decoration: const InputDecoration(),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _ListingEditorField(
+                      label: 'Город или район',
+                      child: TextField(
+                        controller: _region,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(hintText: 'Например, Санкт-Петербург'),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _ListingEditorField(
+                      label: 'Место хранения',
+                      child: TextField(
+                        controller: _storage,
+                        minLines: 1,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          hintText: 'Адрес или ориентир',
+                          helperText: 'Видно только вам и сотрудникам',
+                          helperMaxLines: 3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    if (!['closed', 'blocked'].contains(_listing!['status'])) ...[
+                      ApiButton(label: 'Сохранить черновик', outlined: true, onPressed: () => _save('draft')),
+                      const SizedBox(height: 12),
+                      ApiButton(label: 'Отправить на модерацию', onPressed: () => _save('active')),
+                      const SizedBox(height: 20),
+                    ],
+                    if (_listing!['kind'] == 'lost') ...[
+                      TextButton(
+                        onPressed: () => pushPage(context, MatchFlowPage(listingId: widget.listingId, targetListing: _listing)),
+                        child: const Text('Посмотреть совпадения'),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    const NoticeCard('Изменения опубликованной карточки проходят повторную проверку. Находке нужна фотография; пропажу можно описать без неё.'),
+                  ],
+                ),
+              ),
+  );
+}
+
+class _ListingEditorField extends StatelessWidget {
+  const _ListingEditorField({required this.label, required this.child});
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(label, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+      const SizedBox(height: 8),
+      Semantics(label: label, child: child),
     ],
-    OutlinedButton.icon(onPressed:_uploading ? null : _photos, icon:const Icon(Icons.add_a_photo_outlined), label:Text(_uploading ? 'Загружаем…' : 'Добавить фотографии')),
-    TextField(controller:_title,maxLength:180,decoration:const InputDecoration(labelText:'Название')),
-    TextField(controller:_description,minLines:3,maxLines:8,maxLength:5000,decoration:const InputDecoration(labelText:'Описание без личных данных')),
-    DropdownButtonFormField<String>(initialValue:_category, items:categoryLabels.entries.map((e)=>DropdownMenuItem(value:e.key,child:Text(e.value))).toList(),onChanged:(v)=>setState(()=>_category=v??'other'),decoration:const InputDecoration(labelText:'Категория')),
-    TextField(controller:_region,decoration:const InputDecoration(labelText:'Город или район')),
-    TextField(controller:_storage,decoration:const InputDecoration(labelText:'Место хранения — видно только вам и сотрудникам')),
-    const SizedBox(height:20),
-    if (!['closed','blocked'].contains(_listing!['status'])) ...[
-      ApiButton(label:'Сохранить черновик',outlined:true,onPressed:()=>_save('draft')),
-      const SizedBox(height:12), ApiButton(label:'Отправить на модерацию',onPressed:()=>_save('active')),
-    ],
-    if (_listing!['kind']=='lost') TextButton(onPressed:()=>pushPage(context,MatchFlowPage(listingId:widget.listingId,targetListing:_listing)),child:const Text('Посмотреть совпадения')),
-    const NoticeCard('Изменения опубликованной карточки проходят повторную проверку. Находке нужна фотография; пропажу можно описать без неё.'),
-  ]));
+  );
+}
+
+class _ListingPhotoCard extends StatelessWidget {
+  const _ListingPhotoCard({required this.media, required this.number, required this.onRemove});
+  final JsonMap media;
+  final int number;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = media['download_url']?.toString();
+    final isImage = url != null && media['mime_type'].toString().startsWith('image/');
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 10,
+            child: isImage
+                ? InkWell(
+                    onTap: () => showDialog<void>(context: context, builder: (_) => Dialog(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Align(alignment: Alignment.topRight, child: IconButton(
+                          tooltip: 'Закрыть фото', icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context),
+                        )),
+                        Flexible(child: InteractiveViewer(child: Image.network(url, fit: BoxFit.contain))),
+                      ]),
+                    )),
+                    child: Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, error, stack) => const Center(child: Text('Не удалось загрузить фото')),
+                    ),
+                  )
+                : const Center(child: Icon(Icons.insert_drive_file_outlined, size: 40)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+            child: Row(children: [
+              Expanded(child: Text('Фото $number', style: Theme.of(context).textTheme.bodyMedium)),
+              IconButton(
+                tooltip: 'Удалить фото $number',
+                onPressed: onRemove,
+                icon: const Icon(Icons.delete_outline, color: BureauColors.red),
+              ),
+            ]),
+          ),
+          if (media['status'] != 'ready')
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Text(stateLabel(media['status']), style: Theme.of(context).textTheme.bodyMedium),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class ClaimReviewPage extends StatefulWidget {
@@ -140,3 +309,4 @@ class _ClaimReviewPageState extends State<ClaimReviewPage> {
     ]);
   }));
 }
+
