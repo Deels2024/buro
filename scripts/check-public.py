@@ -82,7 +82,7 @@ def evaluate(responses, expected_release=None, preflight=False):
         try:
             root = ElementTree.fromstring(responses["sitemap"]["body"])
             locations = [node.text for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "loc"]
-            record("sitemap_canonical", PUBLIC + "/" in locations and all(loc and loc.startswith(PUBLIC + "/") for loc in locations), "invalid_canonical_locations")
+            record("sitemap_canonical", bool(locations) and (root.tag.rsplit("}", 1)[-1] == "sitemapindex" or PUBLIC + "/" in locations) and all(loc and loc.startswith(PUBLIC + "/") for loc in locations), "invalid_canonical_locations")
         except ElementTree.ParseError:
             record("sitemap_xml", False, "invalid_xml")
     return checks
@@ -120,3 +120,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

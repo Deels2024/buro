@@ -1,0 +1,40 @@
+name: Search discovery
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Deploy]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-discovery
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v4
+        with:
+          path: .search-state
+          key: search-discovery-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: search-discovery-v1-
+      - name: Submit new, changed and removed public pages
+        run: python scripts/notify-search.py
+      - uses: actions/cache/save@v4
+        with:
+          path: .search-state
+          key: search-discovery-v1-${{ github.run_id }}-${{ github.run_attempt }}

@@ -1,4 +1,6 @@
 """Accessible, server-rendered public pages; private workflows stay in /app/."""
+import hashlib
+import hmac
 import json
 from html import escape
 from urllib.parse import urlencode
@@ -10,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB
+from app.core.config import get_settings
 from app.db.models import Listing, MediaObject
 from app.services.categories import CATEGORIES, category_values, normalize_category
 from app.services.storage import storage
@@ -48,7 +51,7 @@ def page(title: str, description: str, path: str, body: str, *, noindex: bool = 
 <script src="/pwa-launch.js" defer></script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/public.css"><script type="application/ld+json">{data}</script></head><body>
 <a class="skip" href="#content">К содержанию</a><header><div class="nav"><a class="brand" href="/">Бюро находок</a><nav aria-label="Основная навигация"><a href="/naydennye-veshchi/">Находки</a><a href="/poteryannye-veshchi/">Пропажи</a><a href="/organizations/">Организациям</a></nav><a class="button secondary" href="/app/">Личный кабинет</a></div></header>
-<main id="content">{body}</main><footer><div class="footer"><span>Бюро находок · Помогаем вещам вернуться домой</span><nav aria-label="Справка"><a href="/poteryal-veshch/">Потеряли вещь?</a><a href="/nashel-veshch/">Нашли вещь?</a><a href="/app/?action=support">Поддержка</a></nav></div></footer></body></html>'''
+<main id="content">{body}</main><footer><div class="footer"><span>Бюро находок · Помогаем вещам вернуться домой</span><nav aria-label="Справка"><a href="/poteryal-veshch/">Потеряли вещь?</a><a href="/nashel-veshch/">Нашли вещь?</a><a href="/byuro-nahodok-moskva/">Москва</a><a href="/byuro-nahodok-sankt-peterburg/">Санкт-Петербург</a><a href="/app/?action=support">Поддержка</a></nav></div></footer></body></html>'''
     return HTMLResponse(html, status_code=status, headers={"X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "Cache-Control": "no-cache"})
 
 
@@ -160,10 +163,45 @@ async def robots() -> Response:
     return Response(f"User-agent: *\nAllow: /\nDisallow: /app/\nDisallow: /v1/\nDisallow: /admin\nDisallow: /api/\nDisallow: /docs\nDisallow: /redoc\nDisallow: /openapi.json\nSitemap: {ORIGIN}/sitemap.xml\n", media_type="text/plain")
 
 
+SITEMAP_SIZE = 10000
+
+
+def xml_document(kind: str, entries: str) -> Response:
+    content = f'<?xml version="1.0" encoding="UTF-8"?><{kind} xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</{kind}>'
+    return Response(content, media_type="application/xml", headers={"Cache-Control": "no-cache"})
+
+
+def sitemap_urls(urls: list[tuple[str, str | None]]) -> Response:
+    return xml_document("urlset", ''.join(
+        f'<url><loc>{escape(ORIGIN + path)}</loc>'
+        + (f'<lastmod>{escape(modified)}</lastmod>' if modified else '') + '</url>'
+        for path, modified in urls
+    ))
+
+
+@router.get("/indexnow-key.txt")
+async def indexnow_key() -> Response:
+    # Domain verification material only; never expose the application secret.
+    key = hmac.new(get_settings().app_secret.encode(), b"indexnow:edinburo.ru:v1", hashlib.sha256).hexdigest()
+    return Response(key, media_type="text/plain", headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+
+
 @router.get("/sitemap.xml")
 async def sitemap(db: DB) -> Response:
-    rows = await db.execute(select(Listing.id, Listing.updated_at).where(*PUBLIC).order_by(Listing.updated_at.desc()).limit(49000))
-    urls = [("/", None), *((path,None) for path in GUIDES), ("/organizations/",None)]
-    urls.extend((f"/items/{item_id}/", modified.isoformat()) for item_id, modified in rows)
-    content = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{ORIGIN}{path}</loc>'+(f'<lastmod>{modified}</lastmod>' if modified else '')+'</url>' for path,modified in urls) + '</urlset>'
-    return Response(content, media_type="application/xml", headers={"Cache-Control":"no-cache"})
+    count = await db.scalar(select(func.count(Listing.id)).where(*PUBLIC)) or 0
+    paths = ["/sitemaps/pages.xml"] + [f"/sitemaps/items-{part}.xml" for part in range(1, (count + SITEMAP_SIZE - 1) // SITEMAP_SIZE + 1)]
+    return xml_document("sitemapindex", ''.join(f'<sitemap><loc>{ORIGIN}{path}</loc></sitemap>' for path in paths))
+
+
+@router.get("/sitemaps/pages.xml")
+async def sitemap_pages() -> Response:
+    return sitemap_urls([("/", None), *((path, None) for path in GUIDES), ("/organizations/", None)])
+
+
+@router.get("/sitemaps/items-{part}.xml")
+async def sitemap_items(part: int, db: DB) -> Response:
+    if part < 1 or part > 50000:
+        raise HTTPException(404, "Карта сайта не найдена")
+    rows = await db.execute(select(Listing.id, Listing.updated_at).where(*PUBLIC)
+        .order_by(Listing.id).limit(SITEMAP_SIZE).offset((part - 1) * SITEMAP_SIZE))
+    return sitemap_urls([(f"/items/{item_id}/", modified.isoformat()) for item_id, modified in rows])
