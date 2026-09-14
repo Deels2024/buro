@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && node --experimental-strip-types --test tests/integration-contract.test.mjs tests/refresh.test.mjs tests/permissions.test.mjs",
+    "test": "npm run typecheck && node --experimental-strip-types --test tests/integration-contract.test.mjs tests/refresh.test.mjs tests/permissions.test.mjs tests/navigation.test.mjs",
     "lint": "eslint app tests"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "@types/react-dom": "19.2.3",
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.4",
+    "react-test-renderer": "^19.2.6",
     "typescript": "5.9.3"
   },
   "type": "module",
