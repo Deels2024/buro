@@ -748,14 +748,14 @@ textarea:focus-visible {
 }
 
 .user-card strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .user-card small,
 .user-card > b {
   margin-top: 4px;
-  color: #6e808c;
-  font-size: 11px;
+  color: #526777;
+  font-size: 13px;
 }
 
 .match-card {
@@ -817,19 +817,72 @@ textarea:focus-visible {
 
 .ticket-row {
   padding: 16px 4px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.ticket-copy {
+  min-width: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.ticket-row > .status {
+  flex-direction: row;
+}
+
+.user-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
+}
+
+.user-card {
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-content: start;
+}
+
+.user-card > span:nth-child(2) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.user-actions {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.user-actions .mini-button {
+  width: auto;
+  min-height: 40px;
+  padding: 8px 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 700px) {
+  .ticket-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ticket-row > button {
+    grid-column: 1 / -1;
+    justify-self: start;
+    max-width: 100%;
+    white-space: normal;
+  }
 }
 
 .ticket-row strong,
 .ticket-row b,
 .chat-head strong,
 .support-action strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .ticket-row small,
 .chat-head small,
 .support-action small {
-  font-size: 11px;
+  font-size: 13px;
+  color: #526777;
 }
 
 .chat-body {

@@ -276,6 +276,8 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const latestRequest = useRef(0);
+  const activeSection = useRef(section);
 
   const loadSummary = useCallback(async () => {
     if (!isAdmin) return;
@@ -290,36 +292,46 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   }, [isAdmin]);
 
   const loadSection = useCallback(async (key: NavKey, search: string) => {
+    if (key !== activeSection.current) return;
+    const request = ++latestRequest.current;
     setLoading(true);
     setError("");
     try {
       if (!canAccessSection(user.role, key)) throw new Error("Раздел доступен только администратору");
       if (key === "overview" || key === "analytics") {
         await loadSummary();
+        if (request !== latestRequest.current) return;
         setRecords([]);
       } else if (key === "items") {
         const suffix = search ? "&query=" + encodeURIComponent(search) : "";
         const data = await jsonRequest<PageResponse<ListingRow>>("/api/backend/admin/listings?limit=50&offset=" + offset + suffix);
+        if (request !== latestRequest.current) return;
         setRecords(data.items); setTotal(data.total);
       } else if (key === "claims") {
         const data = await jsonRequest<PageResponse<ClaimRow>>("/api/backend/admin/claims?limit=50&offset=" + offset + "&query=" + encodeURIComponent(search));
+        if (request !== latestRequest.current) return;
         setRecords(data.items); setTotal(data.total);
       } else if (key === "matches") {
         const data = await jsonRequest<PageResponse<MatchRow>>("/api/backend/admin/matches?limit=50&offset=" + offset);
+        if (request !== latestRequest.current) return;
         setRecords(data.items); setTotal(data.total);
       } else if (key === "organizations") {
         const suffix = search ? "&query=" + encodeURIComponent(search) : "";
         const data = await jsonRequest<PageResponse<OrganizationRow>>("/api/backend/admin/organizations?limit=50&offset=" + offset + suffix);
+        if (request !== latestRequest.current) return;
         setRecords(data.items); setTotal(data.total);
       } else if (key === "users") {
         const suffix = search ? "&query=" + encodeURIComponent(search) : "";
         const data = await jsonRequest<PageResponse<UserRow>>("/api/backend/admin/users?limit=50&offset=" + offset + suffix);
+        if (request !== latestRequest.current) return;
         setRecords(data.items); setTotal(data.total);
       } else if (key === "moderation") {
         const data = await jsonRequest<ModerationRow[]>("/api/backend/admin/moderation/listings?limit=100");
+        if (request !== latestRequest.current) return;
         setRecords(data); setTotal(data.length);
       } else if (key === "support") {
         const data = await jsonRequest<PageResponse<TicketRow>>("/api/backend/admin/support/tickets?limit=50&offset=" + offset);
+        if (request !== latestRequest.current) return;
         setRecords(data.items); setTotal(data.total);
       } else if (key === "integrations") {
         const [healthResult, organizationsResult, operationsResult] = await Promise.all([
@@ -327,22 +339,25 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
           jsonRequest<PageResponse<OrganizationRow>>("/api/backend/admin/organizations?limit=100"),
           jsonRequest<Operations>("/api/backend/admin/operations"),
         ]);
+        if (request !== latestRequest.current) return;
         setOperations(operationsResult);
         setHealth(healthResult); setRecords(organizationsResult.items); setTotal(organizationsResult.total);
       } else if (key === "settings") {
         const data = await jsonRequest<SettingRow[]>("/api/backend/admin/settings");
+        if (request !== latestRequest.current) return;
         setRecords(data); setTotal(data.length);
       }
     } catch (caught) {
+      if (request !== latestRequest.current) return;
       setError(caught instanceof Error ? caught.message : "Не удалось загрузить данные");
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) setLoading(false);
     }
   }, [loadSummary, offset, user.role]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadSection(section, query); }, 220);
-    return () => window.clearTimeout(timer);
+    return () => { window.clearTimeout(timer); latestRequest.current += 1; };
   }, [section, query, loadSection]);
 
   useEffect(() => {
@@ -357,7 +372,10 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
   }, []);
 
   function navigate(key: NavKey) {
-    if (!canAccessSection(user.role, key)) return;
+    if (!canAccessSection(user.role, key) || key === section) return;
+    activeSection.current = key;
+    latestRequest.current += 1;
+    setRecords([]); setTotal(0); setLoading(true); setError("");
     setSection(key); setOffset(0); setQuery(""); setMenuOpen(false); setSelected(null); setNotice("");
   }
 
@@ -398,7 +416,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
           <div className="top-actions"><button className="sync" onClick={() => void loadSection(section, query)}><i />Обновить данные</button><button className="notification" aria-label="Открытые обращения" onClick={() => navigate("support")}>◌<b>{analytics?.operations.support_open ?? 0}</b></button></div>
         </header>
         <div className="content" id="admin-content" role="main">
-          <div className="page-head"><div><p>{today}</p><h1>{title.title}</h1><span>{title.subtitle}</span></div><div className="page-actions">{isAdmin && <><span className="period-button">Период: 30 дней</span><button className="primary-button" onClick={() => setAddOpen(true)}>＋ Добавить находку</button></>}</div></div>
+          <div className="page-head"><div><p>{today}</p><h1>{title.title}</h1><span>{title.subtitle}</span></div><div className="page-actions">{isAdmin && <>{["overview", "analytics"].includes(section) && <span className="period-button">Период: 30 дней</span>}<button className="primary-button" onClick={() => setAddOpen(true)}>＋ Добавить находку</button></>}</div></div>
           {error && <div className="alert error-alert" role="alert"><strong>Ошибка</strong><span>{error}</span><button aria-label="Закрыть сообщение" onClick={() => setError("")}>×</button></div>}
           {notice && <div className="alert success-alert" role="status"><strong>Готово</strong><span>{notice}</span><button aria-label="Закрыть сообщение" onClick={() => setNotice("")}>×</button></div>}
           {loading && <div className="loading-line" role="status" aria-label="Загрузка данных"><i /></div>}
@@ -412,7 +430,7 @@ function AdminConsole({ user, onLogout }: { user: SessionUser; onLogout: () => v
           {section === "support" && <Support rows={records as TicketRow[]} total={total} onOpen={(row) => setSelected(row as unknown as Record<string, unknown>)} />}
           {section === "integrations" && <Integrations health={health} operations={operations} organizations={records as OrganizationRow[]} analytics={analytics} />}
           {section === "analytics" && <><TrafficCounts/><Analytics analytics={analytics} /></>}
-          {["items","claims","matches","organizations","users","support"].includes(section) && <nav className="modal-actions" aria-label="Страницы реестра"><button className="filter-button" disabled={offset===0||loading} onClick={()=>setOffset(Math.max(0,offset-50))}>Назад</button><span>{offset+1}–{Math.min(offset+50,total)} из {number(total)}</span><button className="filter-button" disabled={offset+50>=total||loading} onClick={()=>setOffset(offset+50)}>Далее</button></nav>}
+          {["items","claims","matches","organizations","users","support"].includes(section) && <nav className="modal-actions" aria-label="Страницы реестра"><button className="filter-button" disabled={offset===0||loading} onClick={()=>setOffset(Math.max(0,offset-50))}>Назад</button><span>{total ? offset+1 : 0}–{Math.min(offset+50,total)} из {number(total)}</span><button className="filter-button" disabled={offset+50>=total||loading} onClick={()=>setOffset(offset+50)}>Далее</button></nav>}
           {section === "settings" && <Settings rows={records as SettingRow[]} onAction={action} />}
         </div>
       </section>
@@ -427,7 +445,7 @@ function Listings({ rows, total, onOpen, canExport }: { canExport: boolean; rows
 }
 
 function Claims({ rows, total, onOpen }: { rows: ClaimRow[]; total: number; onAction: (path: string, init: RequestInit, message: string) => void; onOpen: (row: ClaimRow) => void }) {
-  return <section className="panel"><h2>Заявлений: {number(total)}</h2>{rows.map(row=><article className="ticket-row" key={row.id}><span><strong>Заявление {row.id.slice(0,8)}</strong><small>{formatDate(row.created_at)} · Риск {Math.round(row.risk_score*100)}%</small></span><Status>{statusName(row.status)}</Status><button className="primary-button" disabled={row.status === "draft"} onClick={()=>onOpen(row)}>Проверить доказательства</button></article>)}{!rows.length&&<Empty/>}</section>;
+  return <section className="panel"><h2>Заявлений: {number(total)}</h2>{rows.map(row=><article className="ticket-row" key={row.id}><span className="ticket-copy"><strong>Заявление {row.id.slice(0,8)}</strong><small>{formatDate(row.created_at)} · Риск {Math.round(row.risk_score*100)}%</small></span><Status>{statusName(row.status)}</Status><button className="primary-button" disabled={row.status === "draft"} onClick={()=>onOpen(row)}>Проверить доказательства</button></article>)}{!rows.length&&<Empty/>}</section>;
 }
 
 function Matches({ rows, onAction, onOpen }: { rows: MatchRow[]; onAction: (path: string, init: RequestInit, message: string) => void; onOpen: (row: MatchRow) => void }) {
@@ -461,6 +479,7 @@ function Users({ rows, total, onAction, currentUserId }: {
       <span className="avatar">{(row.display_name || "П").slice(0, 1)}</span>
       <span><strong>{row.display_name || "Пользователь"}</strong><small>{row.phone_masked} · {row.role}</small></span>
       <Status tone={statusTone(row.status)}>{statusName(row.status)}</Status>
+      <div className="user-actions">
       <button className="filter-button mini-button" disabled={row.id === currentUserId || row.status === "deleted"}
         onClick={() => void onAction("/admin/users/" + row.id, {
           method: "PATCH", body: JSON.stringify({ status: row.status === "blocked" ? "active" : "blocked" }),
@@ -471,6 +490,7 @@ function Users({ rows, total, onAction, currentUserId }: {
         <button className="filter-button mini-button" onClick={() => changeModerator(row)}>
           {row.role === "moderator" ? "Снять роль модератора" : "Назначить модератором"}
         </button>}
+      </div>
     </div>)}</div>
     {!rows.length && <Empty />}
   </section>;
@@ -481,7 +501,7 @@ function Moderation({ rows, onAction }: { rows: ModerationRow[]; onAction: (path
 }
 
 function Support({ rows, total, onOpen }: { rows: TicketRow[]; total: number; onOpen: (row: TicketRow) => void }) {
-  return <section className="panel"><h2>Обращений: {number(total)}</h2>{rows.map(row=><article className="ticket-row" key={row.id}><span><strong>{row.subject}</strong><small>{formatDate(row.updated_at)}</small></span><Status>{statusName(row.status)}</Status><button className="primary-button" onClick={()=>onOpen(row)}>Читать и ответить</button></article>)}{!rows.length&&<Empty/>}</section>;
+  return <section className="panel"><h2>Обращений: {number(total)}</h2>{rows.map(row=><article className="ticket-row" key={row.id}><span className="ticket-copy"><strong>{row.subject}</strong><small>{formatDate(row.updated_at)}</small></span><Status>{statusName(row.status)}</Status><button className="primary-button" onClick={()=>onOpen(row)}>Читать и ответить</button></article>)}{!rows.length&&<Empty/>}</section>;
 }
 
 function Integrations({ health, operations, organizations, analytics }: { health: Health | null; operations: Operations | null; organizations: OrganizationRow[]; analytics: AnalyticsData | null }) {
@@ -556,4 +576,3 @@ export default function Home() {
   if (!user) return <Login onDone={setUser} />;
   return <AdminConsole user={user} onLogout={() => void logout()} />;
 }
-
