@@ -15,15 +15,7 @@ docker compose exec -T web wget --header='Host: edinburo.ru' \
 docker compose exec -T web wget --header='Host: edinburo.ru' \
   -qO- http://gateway/sitemaps/pages.xml | grep -q '<loc>https://edinburo.ru/</loc>'
 docker compose exec -T web wget --header='Host: edinburo.ru' \
-  -qO- http://gateway/indexnow-key.txt | grep -Eq '^[a-f0-9]{64}
-for path in poteryal-veshch nashel-veshch poteryannye-veshchi naydennye-veshchi byuro-nahodok-moskva byuro-nahodok-sankt-peterburg; do
-  docker compose exec -T web wget --header='Host: edinburo.ru' \
-    -qO- "http://gateway/$path/" | grep -q '<link rel="canonical"'
-done
-docker compose exec -T admin node -e \
-  "fetch('http://gateway', {headers:{Host:'admin.edinburo.ru'}}).then(async r => { console.log({adminStatus:r.status}); if (!r.ok) process.exit(1) }).catch(e => { console.error(e); process.exit(1) })"
-docker compose ps
-
+  -qO- http://gateway/indexnow-key.txt | grep -Eq '^[a-f0-9]{64}$'
 for path in poteryal-veshch nashel-veshch poteryannye-veshchi naydennye-veshchi byuro-nahodok-moskva byuro-nahodok-sankt-peterburg; do
   docker compose exec -T web wget --header='Host: edinburo.ru' \
     -qO- "http://gateway/$path/" | grep -q '<link rel="canonical"'
