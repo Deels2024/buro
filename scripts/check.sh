@@ -11,7 +11,11 @@ docker compose exec -T web wget --header='Host: edinburo.ru' \
 docker compose exec -T web wget --header='Host: edinburo.ru' \
   -qO- http://gateway/robots.txt | grep -q 'Sitemap: https://edinburo.ru/sitemap.xml'
 docker compose exec -T web wget --header='Host: edinburo.ru' \
-  -qO- http://gateway/sitemap.xml | grep -q '<loc>https://edinburo.ru/</loc>'
+  -qO- http://gateway/sitemap.xml | grep -q '<loc>https://edinburo.ru/sitemaps/pages.xml</loc>'
+docker compose exec -T web wget --header='Host: edinburo.ru' \
+  -qO- http://gateway/sitemaps/pages.xml | grep -q '<loc>https://edinburo.ru/</loc>'
+docker compose exec -T web wget --header='Host: edinburo.ru' \
+  -qO- http://gateway/indexnow-key.txt | grep -Eq '^[a-f0-9]{64}$'
 for path in poteryal-veshch nashel-veshch poteryannye-veshchi naydennye-veshchi byuro-nahodok-moskva byuro-nahodok-sankt-peterburg; do
   docker compose exec -T web wget --header='Host: edinburo.ru' \
     -qO- "http://gateway/$path/" | grep -q '<link rel="canonical"'

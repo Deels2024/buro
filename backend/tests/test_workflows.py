@@ -87,7 +87,7 @@ async def test_two_users_complete_return_and_private_data_stays_private(workflow
     html=await client.get(f'/items/{listing_id}/')
     assert html.status_code==200 and '&lt;script&gt;' in html.text
     assert 'secret-zip' not in html.text and 'PRIVATE-104' not in html.text
-    assert f'/items/{listing_id}/' in (await client.get('/sitemap.xml')).text
+    assert f'/items/{listing_id}/' in (await client.get('/sitemaps/items-1.xml')).text
     claim=(await client.post('/v1/claims',json={'listing_id':listing_id},headers=h('claimant'))).json()
     cid=claim['id']
     assert (await client.get(f'/v1/claims/{cid}/review',headers=h('claimant'))).status_code==403
@@ -132,7 +132,7 @@ async def test_two_users_complete_return_and_private_data_stays_private(workflow
     repeated=await client.post('/v1/claims/handover/scan',json={'token':token},headers=h('holder'))
     assert repeated.json()['completed_at']==completed.json()['completed_at']
     assert (await client.get(f'/items/{listing_id}/')).status_code==404
-    assert f'/items/{listing_id}/' not in (await client.get('/sitemap.xml')).text
+    assert f'/items/{listing_id}/' not in (await client.get('/sitemaps/items-1.xml')).text
     assert (await traffic.traffic_totals())['counts']['handover_completed'] == 1
     async with sessions() as db:
         assert len(list(await db.scalars(select(Handover))))==1
