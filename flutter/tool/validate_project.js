@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 require('./pwa_launch_test.js');
+require('./push_test.js');
 
 const root = path.resolve(__dirname, '..');
 const requiredFiles = [
@@ -29,6 +30,8 @@ const requiredFiles = [
   'web/sitemap.xml',
   'web/site.webmanifest',
   'web/pwa-launch.js',
+  'web/push-client.js',
+  'web/bureau-push-sw.js',
   'web/favicon.svg',
   'web/icons/icon-180.png',
   'web/icons/icon-192.png',
@@ -155,6 +158,8 @@ if (fs.existsSync(buildRoot)) {
     'sitemap.xml',
     'site.webmanifest',
     'pwa-launch.js',
+    'push-client.js',
+    'bureau-push-sw.js',
     'favicon.svg',
     'og-image.png',
     'icons/icon-180.png',

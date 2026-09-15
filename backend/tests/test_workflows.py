@@ -271,6 +271,12 @@ async def test_public_search_tokens_filters_and_private_exclusions(workflow):
     for query in ('travel reflector', 'privatecabinet', 'privateproof', 'privateaddress', '%_*&|!'):
         result = await search(query=query)
         assert result['total'] == (1 if query == 'travel reflector' else 0)
+        public = await client.get('/naydennye-veshchi/', params={'q': query})
+        assert public.status_code == 200
+        assert (f'/items/{first.id}/' in public.text) == (query == 'travel reflector')
+    public = await client.get('/naydennye-veshchi/', params={'q': 'backpack red'})
+    assert f'/items/{first.id}/' in public.text and f'/items/{second.id}/' not in public.text
+    assert f'/items/{first.id}/' not in (await client.get('/naydennye-veshchi/', params={'region': '%'})).text
     assert (await search(query='red', kind='found', category='Сумки', region='Петербург'))['total'] == 1
     assert (await search(query='red', region='%'))['total'] == 0
     assert (await search(query='red', since='2099-01-01T00:00:00Z'))['total'] == 0
@@ -307,6 +313,8 @@ async def test_russian_search_morphology_prefix_json_and_index(workflow):
         result = await client.get('/v1/listings', params={'query':query})
         assert result.status_code == 200, result.text
         assert [item['id'] for item in result.json()['items']] == [str(expected.id)], (query, result.text)
+        public = await client.get('/naydennye-veshchi/', params={'q': query})
+        assert public.status_code == 200 and f'/items/{expected.id}/' in public.text
     # Relevance beats recency, and public JSON words are decoded rather than matching escaped Unicode.
     await search_listing(sessions, users['holder'], title='Дорожная вещь', description='Чёрный рюкзак с красной молнией')
     result = (await client.get('/v1/listings', params={'query':'чёрный рюкзак'})).json()

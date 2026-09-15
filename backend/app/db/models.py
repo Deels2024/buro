@@ -325,6 +325,17 @@ class PushDevice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class PushDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "push_deliveries"
+    __table_args__ = (UniqueConstraint("notification_id", "device_id"),)
+
+    notification_id: Mapped[UUID] = mapped_column(ForeignKey("notifications.id", ondelete="CASCADE"))
+    device_id: Mapped[UUID] = mapped_column(ForeignKey("push_devices.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
 class SupportTicket(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "support_tickets"
 

@@ -118,9 +118,9 @@ def _tokens(user: User, refresh_token: str, *, mfa: bool = False) -> TokenPair:
 
 
 async def _store_refresh(
-    db: DB, user: User, device_name: str | None, *, mfa: bool = False
+    db: DB, user: User, device_name: str | None, *, mfa: bool = False, raw: str | None = None
 ) -> tuple[str, RefreshToken]:
-    raw = random_token(48)
+    raw = raw or random_token(48)
     record = RefreshToken(
         user_id=user.id,
         token_hash=hash_secret(raw),
@@ -318,6 +318,10 @@ async def refresh(
 ) -> TokenPair:
     token_hash = hash_secret(payload.refresh_token)
     recovery_key = "refresh:recovery:" + hash_secret(f"{token_hash}|{operation}") if operation else None
+    # A domain-separated HMAC reproduces only this operation's successor. Its
+    # hash must still exist, be unrevoked and unexpired in the database. Nothing
+    # in Redis can extend the session or resurrect a consumed successor.
+    successor = hash_secret(f"refresh-successor:v1:{token_hash}:{operation}") if operation else None
     # Role changes lock the same user before revoking sessions. Taking locks in
     # this order prevents an in-flight refresh from escaping that revocation.
     user_id = await db.scalar(select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash))
@@ -338,15 +342,22 @@ async def refresh(
         .returning(RefreshToken)
     )
     recovered_raw = None
+    if not record and successor:
+        record = await db.scalar(select(RefreshToken).where(
+            RefreshToken.token_hash == hash_secret(successor),
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now,
+        ))
+        if record:
+            recovered_raw = successor
     if not record and recovery_key:
-        # Only the same saved random operation can recover a lost response.
-        # The encrypted result is written before COMMIT, so concurrent callers
-        # waiting on the UPDATE see it after the winner commits.
+        # Compatibility with random successors issued before this release.
         cached = await redis.get(recovery_key)
         if cached:
             recovered_raw = decrypt_json(cached)["refresh_token"]
             record = await db.scalar(select(RefreshToken).where(
                 RefreshToken.token_hash == hash_secret(recovered_raw),
+                RefreshToken.user_id == user_id,
                 RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now,
             ))
     if not record:
@@ -358,10 +369,8 @@ async def refresh(
     if recovered_raw:
         return _tokens(user, recovered_raw, mfa=record.mfa_verified)
     raw_refresh, _ = await _store_refresh(
-        db, user, payload.device_name or record.device_name, mfa=record.mfa_verified
+        db, user, payload.device_name or record.device_name, mfa=record.mfa_verified, raw=successor
     )
-    if recovery_key:
-        await redis.set(recovery_key, encrypt_json({"refresh_token": raw_refresh}), ex=86400)
     await db.commit()
     return _tokens(user, raw_refresh, mfa=record.mfa_verified)
 

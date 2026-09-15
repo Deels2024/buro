@@ -7,7 +7,16 @@ from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser
 from app.core.security import decrypt_json, encrypt_json, random_token
-from app.db.models import Claim, Conversation, Listing, MediaObject, Message, OrganizationMember, User
+from app.db.models import (
+    Claim,
+    Conversation,
+    Listing,
+    MediaObject,
+    Message,
+    Notification,
+    OrganizationMember,
+    User,
+)
 from app.db.session import SessionLocal
 from app.schemas import ChatMessageCreate, ChatMessageOut
 from app.services.cache import redis, set_json
@@ -117,6 +126,11 @@ async def send_message(
         attachment_ids=[str(value) for value in payload.attachment_ids],
     )
     db.add(message)
+    listing = await db.get(Listing, claim.listing_id)
+    recipients = {claim.claimant_id, listing.owner_id} - {user.id}
+    for recipient in recipients:
+        db.add(Notification(user_id=recipient, kind="chat_message", title="Новое сообщение по вещи",
+            body="Откройте чат, чтобы прочитать ответ.", data={"claim_id": str(claim.id)}))
     await db.commit()
     await db.refresh(message)
     output = _message_out(message)

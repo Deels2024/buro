@@ -1,4 +1,5 @@
 import math
+import unicodedata
 from collections.abc import Iterable
 from datetime import datetime
 
@@ -15,8 +16,10 @@ def cosine_similarity(left: list[float] | None, right: list[float] | None) -> fl
 
 
 def tag_similarity(left: Iterable[str], right: Iterable[str]) -> float:
-    left_set = {value.strip().lower() for value in left if value.strip()}
-    right_set = {value.strip().lower() for value in right if value.strip()}
+    def normalize(value: str) -> str:
+        return " ".join(unicodedata.normalize("NFKC", value).casefold().replace("ё", "е").split())
+    left_set = {normalize(value) for value in left if value.strip()}
+    right_set = {normalize(value) for value in right if value.strip()}
     union = left_set | right_set
     return len(left_set & right_set) / len(union) if union else 0.0
 
@@ -62,7 +65,13 @@ def score_candidate(
         "category": 1.0 if same_category else 0.25,
     }
     weights = {"visual": 0.45, "tags": 0.18, "date": 0.15, "location": 0.12, "category": 0.10}
-    score = sum(factors[key] * weights[key] for key in weights)
+    if not (source_embedding and candidate_embedding and len(source_embedding) == len(candidate_embedding)
+            and any(source_embedding) and any(candidate_embedding)):
+        # Missing evidence is not evidence of a visual mismatch. Preserve a
+        # real low visual similarity when both photos were actually compared.
+        factors.pop("visual")
+        weights.pop("visual")
+    score = sum(factors[key] * weights[key] for key in weights) / sum(weights.values())
     return round(score * 100, 2), {key: round(value, 4) for key, value in factors.items()}
 
 

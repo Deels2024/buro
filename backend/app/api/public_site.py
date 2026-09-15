@@ -8,13 +8,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB
 from app.core.config import get_settings
 from app.db.models import Listing, MediaObject
 from app.services.categories import CATEGORIES, category_values, normalize_category
+from app.services.listing_search import text_search
 from app.services.storage import storage
 from app.services.traffic import record_event
 
@@ -69,8 +70,8 @@ def cards(items: list[Listing]) -> str:
     return '<div class="grid">' + ''.join(result) + '</div>'
 
 
-async def select_listings(db: DB, filters: list, limit: int, offset: int = 0) -> list[Listing]:
-    return list(await db.scalars(select(Listing).where(*PUBLIC, *filters).options(selectinload(Listing.media)).order_by(Listing.published_at.desc(), Listing.id).limit(limit).offset(offset)))
+async def select_listings(db: DB, filters: list, limit: int, offset: int = 0, *, ranking: list | None = None) -> list[Listing]:
+    return list(await db.scalars(select(Listing).where(*PUBLIC, *filters).options(selectinload(Listing.media)).order_by(*(ranking or []), Listing.published_at.desc(), Listing.id).limit(limit).offset(offset)))
 
 
 @router.get("/public.css")
@@ -102,14 +103,16 @@ async def catalogue(request: Request, db: DB, q: str = Query("", max_length=200)
     region = city or region.strip()
     kind = "lost" if path == "/poteryannye-veshchi/" else "found"
     filters = [Listing.kind == kind]
+    ranking = []
     if q.strip():
-        filters.append(or_(Listing.title.ilike(f"%{q.strip()}%"), Listing.description.ilike(f"%{q.strip()}%")))
+        match, ranking = text_search(q, db.get_bind().dialect.name)
+        filters.append(match)
     if region:
-        filters.append(Listing.public_region.ilike(f"%{region}%"))
+        filters.append(Listing.public_region.icontains(region, autoescape=True))
     if category:
         filters.append(func.lower(Listing.category).in_(category_values(category)))
     total = await db.scalar(select(func.count(Listing.id)).where(*PUBLIC, *filters)) or 0
-    items = await select_listings(db, filters, 24, (p-1)*24)
+    items = await select_listings(db, filters, 24, (p-1)*24, ranking=ranking)
     title = GUIDES[path]
     desc = f"{title}: реальные объявления с описанием, фотографиями, местом и датой. Сравните признаки и свяжитесь с держателем через проверку заявки."
     options = '<option value="">Все категории</option>' + ''.join(f'<option value="{code}" {"selected" if code == category else ""}>{label}</option>' for code,label in CATEGORIES.items())

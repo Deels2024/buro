@@ -190,3 +190,57 @@ async def test_parallel_recovery_returns_one_successor(session_app):
         headers=operation) for _ in range(6)))
     assert all(reply.status_code == 200 for reply in replies)
     assert len({reply.json()["refresh_token"] for reply in replies}) == 1
+
+
+async def test_lost_response_recovers_after_days_and_cache_loss(session_app, monkeypatch):
+    client, sessions, fake = session_app
+    user = await add_user(sessions)
+    old = await add_refresh(sessions, user)
+    operation = {"X-Refresh-Operation": uuid4().hex}
+    body = {"refresh_token": old}
+    first = await client.post("/v1/auth/refresh", json=body, headers=operation)
+    assert first.status_code == 200
+    await fake.flushall()
+    later = datetime.now(UTC) + timedelta(days=7)
+
+    class LaterDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return later
+
+    monkeypatch.setattr(auth, "datetime", LaterDateTime)
+    recovered = await client.post("/v1/auth/refresh", json=body, headers=operation)
+    assert recovered.status_code == 200
+    assert recovered.json()["refresh_token"] == first.json()["refresh_token"]
+    # Recovery returns the existing token; it does not mint another 30 days.
+    async with sessions() as db:
+        assert await db.scalar(select(func.count(RefreshToken.id))) == 2
+    later += timedelta(days=30)
+    assert (await client.post("/v1/auth/refresh", json=body, headers=operation)).status_code == 401
+
+
+async def test_recovery_cannot_replay_a_successor_that_was_already_consumed(session_app):
+    client, sessions, _ = session_app
+    user = await add_user(sessions)
+    old = await add_refresh(sessions, user)
+    operation = {"X-Refresh-Operation": uuid4().hex}
+    body = {"refresh_token": old}
+    first = await client.post("/v1/auth/refresh", json=body, headers=operation)
+    assert first.status_code == 200
+    second = await client.post("/v1/auth/refresh", json={"refresh_token": first.json()["refresh_token"]})
+    assert second.status_code == 200
+    assert (await client.post("/v1/auth/refresh", json=body, headers=operation)).status_code == 401
+
+
+async def test_legacy_cached_successor_remains_recoverable(session_app):
+    client, sessions, fake = session_app
+    user = await add_user(sessions)
+    old = await add_refresh(sessions, user, revoked_at=datetime.now(UTC))
+    successor = await add_refresh(sessions, user)
+    operation = uuid4().hex
+    key = "refresh:recovery:" + hash_secret(f"{hash_secret(old)}|{operation}")
+    await fake.set(key, encrypt_json({"refresh_token": successor}), ex=86400)
+    response = await client.post("/v1/auth/refresh", json={"refresh_token": old},
+        headers={"X-Refresh-Operation": operation})
+    assert response.status_code == 200
+    assert response.json()["refresh_token"] == successor

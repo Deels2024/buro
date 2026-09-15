@@ -3,7 +3,7 @@ import hashlib
 import json
 import logging
 import signal
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -14,8 +14,10 @@ from app.db.models import Listing, MatchCandidate, MediaObject, Notification, We
 from app.db.session import SessionLocal
 from app.services.ai import ai_service
 from app.services.cache import enqueue, redis
+from app.services.listing_search import words
 from app.services.matching import distance_km, score_candidate
 from app.services.media_safety import clean_photo
+from app.services.push import deliver_pending
 from app.services.storage import storage
 from app.services.webhooks import create_deliveries, deliver, enqueue_deliveries
 
@@ -95,8 +97,8 @@ async def match_listing(listing_id: UUID) -> None:
                 candidate.approx_longitude,
             )
             score, factors = score_candidate(
-                source_tags=[*source.tags, *source.public_features],
-                candidate_tags=[*candidate.tags, *candidate.public_features],
+                source_tags=[*source.tags, *source.public_features, *words(source.title)],
+                candidate_tags=[*candidate.tags, *candidate.public_features, *words(candidate.title)],
                 source_date=source.event_at,
                 candidate_date=candidate.event_at,
                 distance=distance,
@@ -115,6 +117,7 @@ async def match_listing(listing_id: UUID) -> None:
                     )
                 )
                 is_new = existing is None
+                crossed_threshold = is_new or existing.score < 80
                 if existing:
                     existing.score = score
                     existing.factors = factors
@@ -127,12 +130,18 @@ async def match_listing(listing_id: UUID) -> None:
                             factors=factors,
                         )
                     )
-                if is_new and score >= 80:
+                notified = await db.scalar(select(Notification.id).where(
+                    Notification.user_id == pair_source.owner_id,
+                    Notification.kind == "new_match",
+                    Notification.data["listing_id"].as_string() == str(pair_source.id),
+                    Notification.data["candidate_id"].as_string() == str(pair_candidate.id),
+                ).limit(1)) if crossed_threshold and score >= 80 else None
+                if crossed_threshold and score >= 80 and not notified:
                     db.add(
                         Notification(
                             user_id=pair_source.owner_id,
                             kind="new_match",
-                            title=f"Новое совпадение · {round(score)}%",
+                            title="Появилась похожая вещь",
                             body=f"Возможно, это «{pair_candidate.title}».",
                             data={
                                 "listing_id": str(pair_source.id),
@@ -154,6 +163,26 @@ async def match_listing(listing_id: UUID) -> None:
                     )
         await db.commit()
         await enqueue_deliveries(delivery_ids)
+
+
+async def retry_missing_embeddings() -> None:
+    """Repair cleaned photos after an optional visual service outage."""
+    if not settings.openclip_url:
+        return
+    async with SessionLocal() as db:
+        media = list(await db.scalars(select(MediaObject).where(
+            MediaObject.status == "ready", MediaObject.embedding.is_(None),
+            MediaObject.listing_id.is_not(None), MediaObject.mime_type.like("image/%"),
+        ).order_by(MediaObject.updated_at, MediaObject.id).limit(10)))
+        for item in media:
+            embedding = await ai_service.image_embedding(storage.presign_download(item.object_key, internal=True))
+            item.updated_at = datetime.now(UTC)
+            if embedding is not None:
+                item.embedding = embedding
+            await db.commit()
+            if embedding is None:
+                break  # Back off five minutes instead of hammering an unavailable service.
+            await enqueue("match_listing", {"listing_id": str(item.listing_id)})
 
 
 async def deliver_webhook(delivery_id: UUID) -> None:
@@ -232,9 +261,27 @@ async def run_worker() -> None:
                 if not raw:
                     continue
                 await process_job(raw)
+        async def deliver_notifications() -> None:
+            while True:
+                try:
+                    async with SessionLocal() as db:
+                        await deliver_pending(db)
+                except Exception:
+                    # Provider exceptions may contain subscription credentials.
+                    logger.warning("Push delivery cycle failed; pending notifications will retry")
+                await asyncio.sleep(30)
+        async def repair_photos() -> None:
+            while True:
+                try:
+                    await retry_missing_embeddings()
+                except Exception:
+                    logger.warning("Visual search repair deferred until the next cycle")
+                await asyncio.sleep(300)
         async with asyncio.TaskGroup() as group:
             group.create_task(heartbeat())
             group.create_task(consume())
+            group.create_task(deliver_notifications())
+            group.create_task(repair_photos())
     finally:
         if await lease.owned():
             await redis.delete("bureau:worker:heartbeat")

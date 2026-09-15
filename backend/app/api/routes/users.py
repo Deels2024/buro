@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, CurrentUser
@@ -18,7 +18,9 @@ from app.schemas import (
     SessionOut,
     UserOut,
     UserUpdate,
+    WebPushSubscription,
 )
+from app.services import push
 from app.services.serializers import listing_out
 
 router = APIRouter()
@@ -90,6 +92,41 @@ async def devices(db: DB, user: CurrentUser) -> list[PushDevice]:
         select(PushDevice).where(PushDevice.user_id == user.id).order_by(PushDevice.updated_at.desc())
     )
     return list(result)
+
+
+@router.get("/me/push/config")
+async def push_config(user: CurrentUser) -> dict[str, str]:
+    return {"public_key": push.vapid_keys()[0]}
+
+
+@router.put("/me/push/subscription", response_model=PushDeviceOut)
+async def subscribe_push(payload: WebPushSubscription, db: DB, user: CurrentUser) -> PushDevice:
+    try:
+        subscription = push.validate_subscription(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    token_hash = hash_secret(subscription["endpoint"])
+    device = await db.scalar(select(PushDevice).where(
+        PushDevice.platform == push.PLATFORM, PushDevice.token_hash == token_hash))
+    now = datetime.now(UTC)
+    if not device:
+        count = await db.scalar(select(func.count(PushDevice.id)).where(
+            PushDevice.user_id == user.id, PushDevice.platform == push.PLATFORM, PushDevice.status == "active"))
+        if count >= 10:
+            raise HTTPException(409, "Отключите уведомления на одном из старых устройств")
+        device = PushDevice(user_id=user.id, platform=push.PLATFORM, token_hash=token_hash,
+                            token_cipher=encrypt_json(subscription), device_name="Уведомления браузера")
+        db.add(device)
+    # Do not replay old notifications when an endpoint is reactivated/reassigned.
+    if device.user_id != user.id or device.status != "active":
+        device.created_at = now
+    device.user_id = user.id
+    device.token_cipher = encrypt_json(subscription)
+    device.last_seen_at = now
+    device.status = "active"
+    await db.commit()
+    await db.refresh(device)
+    return device
 
 
 @router.put("/me/devices", response_model=PushDeviceOut)

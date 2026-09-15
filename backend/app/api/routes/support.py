@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser, ModeratorUser
 from app.core.security import decrypt_json, encrypt_json
-from app.db.models import OrganizationMember, SupportMessage, SupportTicket
+from app.db.models import Notification, OrganizationMember, SupportMessage, SupportTicket
 from app.schemas import (
     SupportMessageCreate,
     SupportMessageOut,
@@ -122,6 +122,9 @@ async def add_message(
     if user.role in {"admin", "moderator"}:
         ticket.first_response_at = ticket.first_response_at or datetime.now(UTC)
         ticket.status = "waiting_user" if not internal else ticket.status
+        if not internal and ticket.user_id != user.id:
+            db.add(Notification(user_id=ticket.user_id, kind="support_reply", title="Ответ поддержки",
+                body="Откройте обращение, чтобы прочитать ответ.", data={"ticket_id": str(ticket.id)}))
     elif ticket.status == "waiting_user":
         ticket.status = "in_progress"
     await db.commit()
@@ -188,4 +191,3 @@ async def update_ticket(
     await db.commit()
     await db.refresh(ticket)
     return ticket
-
