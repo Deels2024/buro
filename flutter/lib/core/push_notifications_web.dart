@@ -1,18 +1,22 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
-import 'dart:html' as html;
-import 'dart:js_util' as js;
+import 'dart:js_interop';
 
-Object? get _bridge => js.getProperty<Object?>(html.window, 'bureauPush');
-bool get pushSupported => _bridge != null && js.getProperty<bool>(_bridge!, 'supported');
-Future<String> _call(String method, [List<Object> args = const []]) async {
-  final bridge = _bridge;
-  if (bridge == null) return '';
-  return js.promiseToFuture<String>(js.callMethod<Object>(bridge, method, args));
-}
-Future<String> pushSubscription() => _call('subscription');
-Future<String> subscribePush(String publicKey) => _call('subscribe', [publicKey]);
+@JS('bureauPush')
+external JSObject? get _bridge;
+@JS('bureauPush.supported')
+external bool get _supported;
+@JS('bureauPush.subscription')
+external JSPromise<JSString> _subscription();
+@JS('bureauPush.subscribe')
+external JSPromise<JSString> _subscribe(JSString publicKey);
+@JS('bureauPush.saveDevice')
+external void _saveDevice(JSString id);
+@JS('bureauPush.unsubscribe')
+external JSPromise<JSString> _unsubscribe();
+
+bool get pushSupported => _bridge != null && _supported;
+Future<String> pushSubscription() async => _bridge == null ? '' : (await _subscription().toDart).toDart;
+Future<String> subscribePush(String publicKey) async => (await _subscribe(publicKey.toJS).toDart).toDart;
 void rememberPushDevice(String id) {
-  final bridge = _bridge;
-  if (bridge != null) js.callMethod<void>(bridge, 'saveDevice', [id]);
+  if (_bridge != null) _saveDevice(id.toJS);
 }
-Future<String> unsubscribePush() => _call('unsubscribe');
+Future<String> unsubscribePush() async => _bridge == null ? '' : (await _unsubscribe().toDart).toDart;
