@@ -8,10 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2
 
 WORKDIR /app
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 'torch>=2.7,<3' 'torchvision>=0.22,<1' \
+    && pip install --no-cache-dir -r requirements.txt
 COPY main.py ./
 
-RUN adduser --system --home /home/openclip openclip && chown -R openclip /app /home/openclip
+RUN groupadd --gid 10002 openclip \
+    && useradd --uid 10002 --gid openclip --create-home --home-dir /home/openclip openclip \
+    && mkdir -p /home/openclip/.cache \
+    && chown -R openclip:openclip /app /home/openclip
 USER openclip
 
 EXPOSE 8090

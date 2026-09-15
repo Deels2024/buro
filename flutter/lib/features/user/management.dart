@@ -277,7 +277,7 @@ class _ClaimReviewPageState extends State<ClaimReviewPage> {
     _contact = data['claim']['status'] == 'approved' ? await api.contacts(widget.claimId) : null;
     return data;
   }
-  void _refresh()=>setState(()=>_future=_load());
+  void _refresh()=>setState((){_future=_load();});
   Future<void> _decide(String decision) async {await api.decideClaim(widget.claimId,decision,_reason.text.trim());if(mounted){showApiSuccess(context,'Решение сохранено');_refresh();}}
   @override
   void dispose(){_reason.dispose();_token.dispose();super.dispose();}

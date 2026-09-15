@@ -315,7 +315,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     3 => 'Ответы хранятся в зашифрованном виде',
     4 => 'Добавьте то, что существовало до пропажи',
     5 => 'Проверьте данные перед отправкой',
-    6 => 'Статус: ${_claim?['status'] ?? ''}',
+    6 => 'Статус: ${stateLabel(_claim?['status'])}',
     7 => 'Обе стороны должны дать согласие',
     8 => 'Выберите безопасный способ',
     9 => 'Обе стороны сканируют один код',
@@ -528,7 +528,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
       ),
       const SizedBox(height: 14),
       const NoticeCard(
-        'Ответы шифруются backend и доступны только проверяющей стороне.',
+        'Ответы зашифрованы и доступны только участникам проверки.',
       ),
     ],
   );
@@ -575,7 +575,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
       ),
       const SizedBox(height: 14),
       const NoticeCard(
-        'Можно продолжить без документов. В этом случае backend повысит оценку риска и проверяющая сторона задаст больше вопросов.',
+        'Можно продолжить без документов. Для подтверждения принадлежности вещи могут понадобиться дополнительные сведения.',
       ),
     ],
   );
@@ -626,7 +626,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
     children: [
       SettingRow(
         icon: Icons.hourglass_top_rounded,
-        title: 'Статус: ${_claim?['status'] ?? ''}',
+        title: 'Статус: ${stateLabel(_claim?['status'])}',
         subtitle:
             'Риск: ${(((_claim?['risk_score'] as num?) ?? 0) * 100).round()}%',
         color: BureauColors.amber,
@@ -640,7 +640,7 @@ class _MatchFlowPageState extends State<MatchFlowPage> {
         ),
       const SizedBox(height: 14),
       const NoticeCard(
-        'Следующий шаг откроется после решения держателя вещи. Кнопка ниже обновляет статус с backend.',
+        'Следующий шаг откроется после решения держателя вещи. Нажмите кнопку ниже, чтобы проверить статус.',
       ),
     ],
   );

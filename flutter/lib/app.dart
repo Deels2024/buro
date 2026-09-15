@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'core/theme.dart';
 import 'data/app_controller.dart';
 import 'features/user/user_app.dart';
+import 'features/user/access_help.dart';
 
 class BureauNakhodokApp extends StatefulWidget {
   const BureauNakhodokApp({super.key, this.controller});
@@ -69,7 +70,13 @@ class _BureauNakhodokAppState extends State<BureauNakhodokApp> {
           builder: (context, _) => switch (_controller.state) {
             AppSessionState.initializing => const _AppSplash(),
             AppSessionState.unavailable => _SessionRetry(controller: _controller),
-            AppSessionState.signedOut => Uri.base.queryParameters['action'] != null ? const AuthPage() : const OnboardingPage(),
+            AppSessionState.signedOut => switch (Uri.base.queryParameters['action']) {
+              'support' => const GuestSupportPage(),
+              'privacy' => const ServiceDocumentPage(privacy: true),
+              'terms' => const ServiceDocumentPage(privacy: false),
+              null => const OnboardingPage(),
+              _ => const AuthPage(),
+            },
             AppSessionState.signedIn => const UserShell(),
           },
         ),

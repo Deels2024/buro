@@ -1,10 +1,12 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
-import 'dart:async';
 import 'dart:convert';
-import 'dart:html' as html;
+import 'dart:js_interop';
+
 import 'package:flutter/widgets.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:web/web.dart' as web;
+
 import '../data/bureau_api_client.dart';
+import 'yandex_map_message.dart';
 
 Widget yandexMap({required String apiKey, required List<JsonMap> listings,
   LatLng? selected, ValueChanged<LatLng>? onPick, ValueChanged<JsonMap>? onOpen}) =>
@@ -22,30 +24,31 @@ class _YandexMap extends StatefulWidget {
 }
 
 class _YandexMapState extends State<_YandexMap> {
-  html.IFrameElement? _frame;
-  StreamSubscription<html.MessageEvent>? _messages;
+  web.HTMLIFrameElement? _frame;
+  late final JSFunction _messages;
+  late final JSFunction _loaded;
+
   @override
   void initState() {
     super.initState();
-    _messages = html.window.onMessage.listen((event) {
-      if (!mounted || _frame == null || event.origin != Uri.base.origin || event.source != _frame!.contentWindow || event.data is! String) return;
-      try {
-        final data = jsonDecode(event.data as String);
-        if (data is! Map || data['source'] != 'bureau-yandex') return;
-        if (data['type'] == 'ready') _send();
-        if (data['type'] == 'pick' && data['lat'] is num && data['lon'] is num) {
-          final lat = (data['lat'] as num).toDouble(), lon = (data['lon'] as num).toDouble();
-          if (lat.isFinite && lon.isFinite && lat.abs() <= 90 && lon.abs() <= 180) widget.onPick?.call(LatLng(lat, lon));
-        }
-        if (data['type'] == 'open' && data['index'] is int) {
-          final index = data['index'] as int;
-          if (index >= 0 && index < widget.listings.length) widget.onOpen?.call(widget.listings[index]);
-        }
-      } on FormatException {
-        // Ignore unrelated messages from embedded content.
+    _loaded = ((web.Event event) { if (mounted) _send(); }).toJS;
+    _messages = ((web.MessageEvent event) {
+      if (!mounted) return;
+      final data = decodeMapMessage(event, _frame?.contentWindow, Uri.base.origin);
+      if (data == null) return;
+      if (data['type'] == 'ready') _send();
+      if (data['type'] == 'pick' && data['lat'] is num && data['lon'] is num) {
+        final lat = (data['lat'] as num).toDouble(), lon = (data['lon'] as num).toDouble();
+        if (lat.isFinite && lon.isFinite && lat.abs() <= 90 && lon.abs() <= 180) widget.onPick?.call(LatLng(lat, lon));
       }
-    });
+      if (data['type'] == 'open' && data['index'] is int) {
+        final index = data['index'] as int;
+        if (index >= 0 && index < widget.listings.length) widget.onOpen?.call(widget.listings[index]);
+      }
+    }).toJS;
+    web.window.addEventListener('message', _messages);
   }
+
   void _send() {
     _frame?.contentWindow?.postMessage(jsonEncode({
       'source': 'bureau-flutter', 'key': widget.apiKey, 'editable': widget.onPick != null,
@@ -53,21 +56,30 @@ class _YandexMapState extends State<_YandexMap> {
       'markers': [for (var i = 0; i < widget.listings.length; i++)
         if (widget.listings[i]['approx_latitude'] is num && widget.listings[i]['approx_longitude'] is num)
           {'index': i, 'lat': widget.listings[i]['approx_latitude'], 'lon': widget.listings[i]['approx_longitude']}],
-    }), Uri.base.origin);
+    }).toJS, Uri.base.origin.toJS);
   }
+
   @override
   void didUpdateWidget(covariant _YandexMap oldWidget) { super.didUpdateWidget(oldWidget); _send(); }
   @override
-  void dispose() { _messages?.cancel(); super.dispose(); }
+  void dispose() {
+    web.window.removeEventListener('message', _messages);
+    _frame?.removeEventListener('load', _loaded);
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) => SizedBox(height: 400, child: HtmlElementView.fromTagName(
     tagName: 'iframe',
     onElementCreated: (element) {
-      final frame = element as html.IFrameElement;
+      _frame?.removeEventListener('load', _loaded);
+      final frame = element as web.HTMLIFrameElement;
       _frame = frame;
       frame.title = 'Яндекс Карта';
       frame.style.border = '0'; frame.style.width = '100%'; frame.style.height = '100%';
       frame.setAttribute('allow', 'geolocation');
+      // Flutter creates the element before attaching it to the DOM. Re-send
+      // on load as well as ready, so a missed handshake cannot leave it blank.
+      frame.addEventListener('load', _loaded);
       frame.src = Uri.base.resolve('yandex-map.html').toString();
     },
   ));

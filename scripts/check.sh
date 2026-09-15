@@ -5,6 +5,8 @@ set -eu
 
 docker compose config --quiet
 docker compose exec -T api python -c \
+  "import json, urllib.request; from app.core.config import settings; data=json.load(urllib.request.urlopen(settings.openclip_url.rstrip('/')+'/health/ready', timeout=10)); assert data['status']=='ready'; print('Visual search model: ready')"
+docker compose exec -T api python -c \
   "import json, urllib.request; request=urllib.request.Request('http://gateway/v1/health/ready', headers={'Host':'edinburo.ru'}); print(json.load(urllib.request.urlopen(request, timeout=10)))"
 docker compose exec -T web wget --header='Host: edinburo.ru' \
   -qO- http://gateway/ >/dev/null

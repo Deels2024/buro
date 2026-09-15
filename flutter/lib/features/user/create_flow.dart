@@ -51,10 +51,46 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   final List<XFile> _files = [];
   bool _uploading = false;
   bool _describing = false;
+  bool _submitting = false;
+  bool _confirmingExit = false;
   LatLng? _point;
 
   Color get _accent => _found ? BureauColors.green : BureauColors.blue;
   Color get _soft => _found ? BureauColors.greenSoft : BureauColors.blueSoft;
+
+  bool get _busy => _uploading || _describing || _submitting;
+  bool get _dirty => _files.isNotEmpty || _point != null ||
+      [_title, _description, _features, _tags, _hidden, _region, _address]
+          .any((field) => field.text.trim().isNotEmpty) ||
+      _category.text != 'other' || _found != widget.initialFound ||
+      _storage.text != (widget.initialStorageCode ?? '');
+
+  Future<void> _back() async {
+    if (_busy) return;
+    if (_step > 0) {
+      setState(() => _step--);
+    } else {
+      await _close();
+    }
+  }
+
+  Future<void> _close() async {
+    if (_busy || _confirmingExit) return;
+    if (_dirty) {
+      _confirmingExit = true;
+      final discard = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Выйти из формы?'),
+        content: const Text('Введённые данные ещё не сохранены. При выходе они будут потеряны.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Продолжить заполнение')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Выйти без сохранения')),
+        ],
+      ));
+      _confirmingExit = false;
+      if (discard != true || !mounted) return;
+    }
+    if (mounted) Navigator.pop(context);
+  }
 
   @override
   void dispose() {
@@ -98,6 +134,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
           mimeType: mime,
           purpose: 'listing',
         );
+        if (!mounted) return;
         _files.add(file);
         _media.add(media);
       }
@@ -174,12 +211,18 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
   }
 
   Future<void> _next() async {
+    if (_busy) return;
     if (!_validateStep()) return;
     if (_step < 3) {
       setState(() => _step++);
       return;
     }
-    await _submit();
+    setState(() => _submitting = true);
+    try {
+      await _submit();
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -233,14 +276,19 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
     final titles = _found
         ? ['Фото находки', 'Описание находки', 'Место хранения', 'Предпросмотр']
         : ['Фото пропажи', 'Описание пропажи', 'Место и время', 'Предпросмотр'];
-    return BureauPage(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) { if (!didPop) _back(); },
+      child: BureauPage(
+      leading: BackButton(onPressed: _back),
       title: titles[_step],
       subtitle: 'Шаг ${_step + 1} из 4 · ${_found ? 'находка' : 'пропажа'}',
       actions: [
         TextButton(
-          onPressed: () => setState(() => _found = !_found),
+          onPressed: _busy ? null : () => setState(() => _found = !_found),
           child: Text(_found ? 'Это пропажа' : 'Это находка'),
         ),
+        IconButton(tooltip: 'Закрыть форму', onPressed: _busy ? null : _close, icon: const Icon(Icons.close)),
       ],
       bottom: ApiButton(
         label: _step == 3
@@ -253,7 +301,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
         duration: const Duration(milliseconds: 220),
         child: KeyedSubtree(key: ValueKey(_step), child: _body(context)),
       ),
-    );
+    ));
   }
 
   Widget _body(BuildContext context) => switch (_step) {
@@ -326,10 +374,13 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
           runSpacing: 8,
           children: [
             for (var index = 0; index < _files.length; index++)
-              BureauPill(
-                'Фото ${index + 1}',
-                color: _accent,
-                background: _soft,
+              InputChip(
+                label: Text('Фото ${index + 1}'),
+                deleteButtonTooltipMessage: 'Удалить фото ${index + 1}',
+                onDeleted: _busy ? null : () => setState(() {
+                  _files.removeAt(index);
+                  _media.removeAt(index);
+                }),
               ),
           ],
         ),
@@ -344,7 +395,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       NoticeCard(
         _found
             ? 'Не показывайте серийные номера публично — добавьте их как скрытый признак.'
-            : 'Если фото нет, запись сохранится как черновик и её можно дополнить позже.',
+            : 'Пропажу можно опубликовать без фото и дополнить фотографией позже.',
         color: _accent,
         background: _soft,
         icon: Icons.shield_outlined,
@@ -477,6 +528,10 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       ),
       const SizedBox(height: 14),
       Text(_title.text, style: Theme.of(context).textTheme.headlineSmall),
+      Wrap(spacing: 8, children: [
+        for (final entry in {0: 'Изменить фото', 1: 'Изменить описание', 2: 'Изменить место'}.entries)
+          TextButton(onPressed: _busy ? null : () => setState(() => _step = entry.key), child: Text(entry.value)),
+      ]),
       const SizedBox(height: 8),
       Text(
         _description.text,
@@ -579,4 +634,3 @@ class PublicationSuccessPage extends StatelessWidget {
     ),
   );
 }
-

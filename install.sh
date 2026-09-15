@@ -123,7 +123,7 @@ chmod 700 .releases
 if [ -f .releases/current ]; then cp .releases/current .releases/previous; fi
 cp docker-compose.yml ".releases/$BN_RELEASE_SHA.compose.yml"
 cp nginx/default.conf ".releases/$BN_RELEASE_SHA.nginx.conf"
-if ! docker compose up -d --no-build --wait --wait-timeout "${INSTALL_WAIT_TIMEOUT:-300}"; then
+if ! docker compose up -d --no-build --wait --wait-timeout "${INSTALL_WAIT_TIMEOUT:-900}"; then
   echo "Release activation failed. Previous images are retained for scripts/rollback.sh." >&2
   exit 1
 fi

@@ -1,13 +1,17 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser, ModeratorUser
-from app.core.security import decrypt_json, encrypt_json
+from app.api.routes.auth import _client_ip
+from app.core.security import decrypt_json, encrypt_json, hash_secret
 from app.db.models import Notification, OrganizationMember, SupportMessage, SupportTicket
 from app.schemas import (
+    AdminSupportTicketOut,
+    GuestSupportCreate,
+    GuestSupportReceipt,
     SupportMessageCreate,
     SupportMessageOut,
     SupportTicketCreate,
@@ -15,9 +19,40 @@ from app.schemas import (
     SupportTicketUpdate,
 )
 from app.services.audit import add_audit
+from app.services.cache import rate_limit
 
 router = APIRouter()
 admin_router = APIRouter()
+
+
+@router.post("/guest", response_model=GuestSupportReceipt, status_code=201)
+async def guest_ticket(payload: GuestSupportCreate, request: Request, response: Response, db: DB):
+    # A receipt is not an access token: guests cannot read any ticket or reply.
+    # Hash rate-limit keys and encrypt the callback address at rest.
+    ip_key = hash_secret(_client_ip(request))
+    contact_key = hash_secret(payload.contact.lower())
+    if (not await rate_limit(f"support:guest:ip:{ip_key}", 5, 3600)
+            or not await rate_limit(f"support:guest:contact:{contact_key}", 3, 86400)):
+        raise HTTPException(429, "Лимит обращений исчерпан. Попробуйте позже.")
+    ticket = SupportTicket(user_id=None, subject=payload.subject, category="technical",
+                           guest_contact_cipher=encrypt_json({"contact": payload.contact}))
+    db.add(ticket)
+    await db.flush()
+    db.add(SupportMessage(ticket_id=ticket.id, sender_id=None,
+                          body_cipher=encrypt_json({"body": payload.message}), attachment_ids=[]))
+    await db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return GuestSupportReceipt(id=ticket.id, message="Обращение принято. Сохраните его номер.")
+
+
+@admin_router.get("/tickets/{ticket_id}", response_model=AdminSupportTicketOut)
+async def admin_ticket(ticket_id: UUID, db: DB, admin: ModeratorUser, response: Response):
+    ticket = await _ticket_access(db, ticket_id, admin)
+    response.headers["Cache-Control"] = "no-store"
+    result = AdminSupportTicketOut.model_validate(ticket)
+    if ticket.guest_contact_cipher:
+        result.guest_contact = decrypt_json(ticket.guest_contact_cipher)["contact"]
+    return result
 
 
 def _message_out(message: SupportMessage) -> SupportMessageOut:
@@ -111,6 +146,8 @@ async def add_message(
     if ticket.status == "closed":
         raise HTTPException(status_code=409, detail="Обращение закрыто")
     internal = payload.internal and user.role in {"admin", "moderator"}
+    if ticket.user_id is None and not internal:
+        raise HTTPException(422, "Ответьте по указанному контакту. Здесь можно сохранить внутреннюю заметку.")
     message = SupportMessage(
         ticket_id=ticket.id,
         sender_id=user.id,
@@ -122,7 +159,7 @@ async def add_message(
     if user.role in {"admin", "moderator"}:
         ticket.first_response_at = ticket.first_response_at or datetime.now(UTC)
         ticket.status = "waiting_user" if not internal else ticket.status
-        if not internal and ticket.user_id != user.id:
+        if not internal and ticket.user_id is not None and ticket.user_id != user.id:
             db.add(Notification(user_id=ticket.user_id, kind="support_reply", title="Ответ поддержки",
                 body="Откройте обращение, чтобы прочитать ответ.", data={"ticket_id": str(ticket.id)}))
     elif ticket.status == "waiting_user":

@@ -19,7 +19,7 @@ class OrganizationAuthPage extends StatelessWidget {
     final app = AppScope.of(context);
     return BureauPage(
       title: 'Организации',
-      subtitle: 'Доступ определяется членством backend',
+      subtitle: 'Кабинеты ваших организаций',
       bottom: OutlinedButton.icon(
         onPressed: () => pushPage(context, const OrganizationCreatePage()),
         icon: const Icon(Icons.add_business_rounded),
@@ -29,7 +29,7 @@ class OrganizationAuthPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const NoticeCard(
-            'Отдельного пароля организации нет: сотрудник входит по телефону, а backend проверяет его роль и членство.',
+            'Войдите по телефону, который использовали при подключении организации или приглашении в команду.',
             color: BureauColors.green,
             background: BureauColors.greenSoft,
           ),
@@ -39,7 +39,7 @@ class OrganizationAuthPage extends StatelessWidget {
               icon: Icons.business_rounded,
               title: organization['name']?.toString() ?? 'Организация',
               subtitle:
-                  'ИНН ${organization['inn']} · ${organization['status']}',
+                  'ИНН ${organization['inn']} · ${stateLabel(organization['status'])}',
               color: BureauColors.green,
               background: BureauColors.greenSoft,
               onTap: () {
@@ -114,7 +114,7 @@ class _OrganizationCreatePageState extends State<OrganizationCreatePage> {
         ),
         const SizedBox(height: 14),
         const NoticeCard(
-          'После отправки организация получит статус pending. Проверку завершает модератор.',
+          'После отправки модератор проверит заявку. Статус проверки появится в кабинете.',
           color: BureauColors.amber,
           background: BureauColors.amberSoft,
         ),
@@ -481,7 +481,7 @@ class _OrgInventoryPageState extends State<OrgInventoryPage> {
                         icon: Icons.inventory_2_outlined,
                         title: item['title']?.toString() ?? '',
                         subtitle:
-                            '${item['storage_code'] ?? 'Без ячейки'} · ${item['status']}',
+                            '${item['storage_code'] ?? 'Без ячейки'} · ${stateLabel(item['status'])}',
                         color: BureauColors.green,
                         background: BureauColors.greenSoft,
                         onTap: () => pushPage(
@@ -557,7 +557,7 @@ class _OrgClaimsPageState extends State<OrgClaimsPage> {
                   icon: Icons.fact_check_outlined,
                   title: 'Заявление ${claim['id'].toString().substring(0, 8)}',
                   subtitle:
-                      '${claim['status']} · риск ${(((claim['risk_score'] as num?) ?? 0) * 100).round()}%',
+                      '${stateLabel(claim['status'])} · риск ${(((claim['risk_score'] as num?) ?? 0) * 100).round()}%',
                   color: claim['status'] == 'approved'
                       ? BureauColors.green
                       : BureauColors.amber,
@@ -643,7 +643,7 @@ class _OrgTeamPageState extends State<OrgTeamPage> {
                 items: const ['manager', 'operator', 'viewer']
                     .map(
                       (item) =>
-                          DropdownMenuItem(value: item, child: Text(item)),
+                          DropdownMenuItem(value: item, child: Text(roleLabels[item] ?? 'Участник')),
                     )
                     .toList(),
                 onChanged: (value) =>
@@ -704,7 +704,7 @@ class _OrgTeamPageState extends State<OrgTeamPage> {
                 SettingRow(
                   icon: Icons.person_outline_rounded,
                   title: member['display_name']?.toString() ?? '',
-                  subtitle: '${member['role']} · ${member['status']}',
+                  subtitle: '${roleLabels[member['role']] ?? 'Участник'} · ${accessStateLabel(member['status'])}',
                   color: BureauColors.green,
                   background: BureauColors.greenSoft,
                 ),
@@ -1158,7 +1158,7 @@ class _OrganizationSettingsPageState extends State<OrganizationSettingsPage> {
                   SettingRow(
                     icon: Icons.key_rounded,
                     title: key['name']?.toString() ?? '',
-                    subtitle: '${key['key_prefix']} · ${key['status']}',
+                    subtitle: '${key['key_prefix']} · ${accessStateLabel(key['status'])}',
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -1172,7 +1172,7 @@ class _OrganizationSettingsPageState extends State<OrganizationSettingsPage> {
                   SettingRow(
                     icon: Icons.webhook_rounded,
                     title: hook['name']?.toString() ?? '',
-                    subtitle: '${hook['url']} · ${hook['status']}',
+                    subtitle: '${hook['url']} · ${accessStateLabel(hook['status'])}',
                   ),
                   const SizedBox(height: 10),
                 ],
