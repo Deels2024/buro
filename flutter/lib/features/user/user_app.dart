@@ -20,6 +20,7 @@ import '../catalog/catalog_page.dart';
 import '../organization/organization_app.dart';
 import 'create_flow.dart';
 import 'match_flow.dart';
+import 'access_help.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
@@ -212,7 +213,7 @@ class _AuthPageState extends State<AuthPage> {
           ),
           const SizedBox(height: 26),
           const NoticeCard(
-            'Номер телефона не показывается другим пользователям и используется только для входа.',
+            'Телефон скрыт в публичных карточках. При возврате вещи передача контактов требует согласия обеих сторон.',
           ),
           const SizedBox(height: 22),
           Text(
@@ -222,6 +223,11 @@ class _AuthPageState extends State<AuthPage> {
               context,
             ).textTheme.bodyMedium?.copyWith(fontSize: 12),
           ),
+          Wrap(spacing: 8, children: [
+            TextButton(onPressed: () => pushPage(context, const ServiceDocumentPage(privacy: false)), child: const Text('Правила сервиса')),
+            TextButton(onPressed: () => pushPage(context, const ServiceDocumentPage(privacy: true)), child: const Text('Политика конфиденциальности')),
+          ]),
+          TextButton(onPressed: () => pushPage(context, const GuestSupportPage()), child: const Text('Не получается войти?')),
         ],
       ),
     );
@@ -397,6 +403,7 @@ class _UserShellState extends State<UserShell> {
       if (action == 'claim' && id != null) target = MatchFlowPage(listingId: id);
       if (action == 'listing' && id != null) target = ItemDetailPage(listingId: id);
       if (action == 'support') target = const SupportCreatePage();
+      if (action == 'privacy' || action == 'terms') target = ServiceDocumentPage(privacy: action == 'privacy');
       if (action == 'notifications') target = const NotificationsPage();
       if (action == 'organization') target = const OrganizationAuthPage();
       if (target != null) pushPage(context, target);
@@ -491,7 +498,7 @@ class _HomeViewState extends State<HomeView> {
 
   Future<void> _refresh() async {
     final future = _load();
-    setState(() => _future = future);
+    setState(() { _future = future; });
     await future;
   }
 
@@ -1067,7 +1074,7 @@ class _CasesViewState extends State<CasesView> {
                 SettingRow(
                   icon: Icons.support_agent_rounded,
                   title: ticket['subject']?.toString() ?? 'Обращение',
-                  subtitle: '${ticket['status']} · ${ticket['category']}',
+                  subtitle: '${stateLabel(ticket['status'])} · ${supportCategoryLabels[ticket['category']] ?? 'Другое'}',
                   onTap: () =>
                       pushPage(context, SupportChatPage(ticket: ticket)),
                 ),
@@ -1123,7 +1130,7 @@ class ProfileView extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       Text(
-                        '${user['phone_masked'] ?? ''} · ${user['status'] ?? ''}',
+                        '${user['phone_masked'] ?? ''} · ${user['status'] == 'active' ? 'Аккаунт активен' : stateLabel(user['status'])}',
                         style: Theme.of(
                           context,
                         ).textTheme.bodyMedium?.copyWith(fontSize: 12),
@@ -1143,7 +1150,7 @@ class ProfileView extends StatelessWidget {
           SettingRow(
             icon: Icons.notifications_none_rounded,
             title: 'Уведомления',
-            subtitle: 'Все события backend',
+            subtitle: 'Совпадения и ответы',
             onTap: () => pushPage(context, const NotificationsPage()),
           ),
           const SizedBox(height: 10),
@@ -1214,14 +1221,37 @@ class ItemDetailPage extends StatefulWidget {
 
 class _ItemDetailPageState extends State<ItemDetailPage> {
   late Future<JsonMap> _future;
-  bool _saved = false;
+  bool? _saved;
+  bool _saving = false, _started = false, _savedLoading = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _load();
+  }
+
+  void _load() {
     _future = widget.listing != null
         ? Future.value(widget.listing)
         : AppScope.of(context, listen: false).api.listing(widget.listingId!);
+    _loadSaved();
+  }
+
+  Future<void> _loadSaved() async {
+    final controller = AppScope.of(context, listen: false);
+    if (!controller.isSignedIn || _savedLoading) return;
+    setState(() => _savedLoading = true);
+    try {
+      final items = await controller.api.savedListings();
+      final id = widget.listing?['id'] ?? widget.listingId;
+      if (mounted) setState(() => _saved = items.any((item) => item['id'] == id));
+    } catch (error) {
+      if (mounted) showApiError(context, error);
+    } finally {
+      if (mounted) setState(() => _savedLoading = false);
+    }
   }
 
   @override
@@ -1244,24 +1274,29 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           actions: [
             if (listing != null) IconButton(tooltip:'Поделиться ссылкой', icon:const Icon(Icons.link), onPressed:()=>launchUrl(Uri.parse('https://edinburo.ru/items/${listing['id']}/'))),
             IconButton(
-              onPressed: listing == null
+              tooltip: _saved == null ? 'Повторить загрузку закладки' : _saved! ? 'Удалить из сохранённого' : 'Сохранить',
+              onPressed: listing == null || _saving || _savedLoading
                   ? null
                   : () async {
+                      if (_saved == null) { await _loadSaved(); return; }
+                      setState(() => _saving = true);
                       final api = AppScope.of(context, listen: false).api;
                       try {
-                        if (_saved) {
+                        if (_saved!) {
                           await api.unsaveListing(listing['id'].toString());
                         } else {
                           await api.saveListing(listing['id'].toString());
                         }
-                        if (mounted) setState(() => _saved = !_saved);
+                        if (mounted) setState(() => _saved = !_saved!);
                       } catch (error) {
                         if (!context.mounted) return;
                         showApiError(context, error);
+                      } finally {
+                        if (mounted) setState(() => _saving = false);
                       }
                     },
               icon: Icon(
-                _saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                _saved == true ? Icons.bookmark_rounded : _saved == null ? Icons.sync_rounded : Icons.bookmark_border_rounded,
               ),
             ),
           ],
@@ -1278,11 +1313,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           child: snapshot.connectionState != ConnectionState.done
               ? const Center(child: CircularProgressIndicator())
               : snapshot.hasError
-              ? NoticeCard(
+              ? Column(children: [NoticeCard(
                   apiErrorText(snapshot.error!),
                   color: BureauColors.red,
                   background: BureauColors.redSoft,
-                )
+                ), OutlinedButton(onPressed: () => setState(_load), child: const Text('Повторить загрузку'))])
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1306,7 +1341,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                           background: soft,
                         ),
                         BureauPill(
-                          listing['category']?.toString() ?? '',
+                          categoryLabels[listing['category']] ?? 'Другое',
                           background: Colors.white,
                         ),
                       ],
@@ -1652,6 +1687,45 @@ class NotificationsPage extends StatefulWidget {
 
 class _NotificationsPageState extends State<NotificationsPage> {
   late Future<List<JsonMap>> _future;
+  bool _opening = false;
+
+  Future<void> _open(JsonMap item) async {
+    if (_opening) return;
+    _opening = true;
+    final api = AppScope.of(context, listen: false).api;
+    try {
+      final data = Map<String, dynamic>.from(item['data'] as Map? ?? const {});
+      Widget? target;
+      final claimId = data['claim_id']?.toString();
+      final ticketId = data['ticket_id']?.toString();
+      final listingId = data['listing_id']?.toString();
+      if (claimId != null) {
+        if (item['kind'] == 'chat_message') {
+          target = BureauPage(title: 'Защищённый чат', child: ClaimChat(claimId: claimId));
+        } else if (item['kind'] == 'claim_submitted') {
+          target = ClaimReviewPage(claimId: claimId);
+        } else {
+          final claim = await api.claim(claimId);
+          target = MatchFlowPage(listingId: claim['listing_id'].toString(), claimId: claimId);
+        }
+      } else if (ticketId != null) {
+        target = SupportChatPage(ticket: await api.supportTicket(ticketId));
+      } else if (listingId != null) {
+        final listing = await api.listing(listingId);
+        target = item['kind'] == 'new_match' && listing['kind'] == 'lost'
+          ? MatchFlowPage(listingId: listingId, targetListing: listing)
+          : ItemDetailPage(listingId: data['candidate_id']?.toString() ?? listingId);
+      }
+      await api.readNotification(item['id'].toString());
+      if (!mounted) return;
+      _reload();
+      if (target != null) await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => target!));
+    } catch (error) {
+      if (mounted) showApiError(context, error);
+    } finally {
+      _opening = false;
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -1660,7 +1734,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   void _reload() => setState(
-    () => _future = AppScope.of(context, listen: false).api.notifications(),
+    () { _future = AppScope.of(context, listen: false).api.notifications(); },
   );
 
   @override
@@ -1696,13 +1770,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               background: item['read_at'] == null
                   ? BureauColors.greenSoft
                   : Colors.white,
-              onTap: () async {
-                await AppScope.of(
-                  context,
-                  listen: false,
-                ).api.readNotification(item['id'].toString());
-                _reload();
-              },
+              onTap: () => _open(item),
             ),
             const SizedBox(height: 10),
           ],
@@ -1722,6 +1790,12 @@ class SavedPage extends StatefulWidget {
 
 class _SavedPageState extends State<SavedPage> {
   late Future<List<JsonMap>> _future;
+  final Set<String> _removed = {};
+
+  void _reload() => setState(() {
+    _removed.clear();
+    _future = AppScope.of(context, listen: false).api.savedListings();
+  });
 
   @override
   void didChangeDependencies() {
@@ -1738,9 +1812,11 @@ class _SavedPageState extends State<SavedPage> {
       empty: const NoticeCard('Сохранённых публикаций пока нет.'),
       builder: (context, items) => Column(
         children: [
-          for (final item in items) ...[
+          if (items.every((item) => _removed.contains(item['id'].toString())))
+            const NoticeCard('Сохранённых публикаций пока нет.'),
+          for (final item in items.where((item) => !_removed.contains(item['id'].toString()))) ...[
             Dismissible(
-              key: ValueKey(item['id']),
+              key: ValueKey(item['id'].toString()),
               background: Container(
                 color: BureauColors.redSoft,
                 alignment: Alignment.centerRight,
@@ -1750,11 +1826,17 @@ class _SavedPageState extends State<SavedPage> {
                   color: BureauColors.red,
                 ),
               ),
-              onDismissed: (_) => AppScope.of(
-                context,
-                listen: false,
-              ).api.unsaveListing(item['id'].toString()),
-              child: _ListingCard(listing: item),
+              confirmDismiss: (_) async {
+                try {
+                  await AppScope.of(context, listen: false).api.unsaveListing(item['id'].toString());
+                  return true;
+                } catch (error) {
+                  if (context.mounted) showApiError(context, error);
+                  return false;
+                }
+              },
+              onDismissed: (_) => setState(() => _removed.add(item['id'].toString())),
+              child: _ListingCard(listing: item, onReturned: _reload),
             ),
             const SizedBox(height: 12),
           ],
@@ -1832,10 +1914,10 @@ class _ProfileSecurityPageState extends State<ProfileSecurityPage> {
                       ).api.revokeSession(item['id'].toString());
                       if (mounted) {
                         setState(
-                          () => _sessions = AppScope.of(
+                          () { _sessions = AppScope.of(
                             context,
                             listen: false,
-                          ).api.sessions(),
+                          ).api.sessions(); },
                         );
                       }
                     },
@@ -1911,7 +1993,7 @@ class _SupportCreatePageState extends State<SupportCreatePage> {
                     'other',
                   ]
                   .map(
-                    (item) => DropdownMenuItem(value: item, child: Text(item)),
+                    (item) => DropdownMenuItem(value: item, child: Text(supportCategoryLabels[item] ?? 'Другое')),
                   )
                   .toList(),
           onChanged: (value) => _category = value ?? 'other',
@@ -1947,15 +2029,15 @@ class _SupportChatPageState extends State<SupportChatPage> {
   }
 
   void _reload() => setState(
-    () => _future = AppScope.of(
+    () { _future = AppScope.of(
       context,
       listen: false,
-    ).api.supportMessages(widget.ticket['id'].toString()),
+    ).api.supportMessages(widget.ticket['id'].toString()); },
   );
   @override
   Widget build(BuildContext context) => BureauPage(
     title: widget.ticket['subject']?.toString() ?? 'Поддержка',
-    subtitle: widget.ticket['status']?.toString() ?? '',
+    subtitle: stateLabel(widget.ticket['status']),
     bottom: Row(
       children: [
         Expanded(
@@ -2001,12 +2083,16 @@ class _SupportChatPageState extends State<SupportChatPage> {
 }
 
 class _ListingCard extends StatelessWidget {
-  const _ListingCard({required this.listing, this.score});
+  const _ListingCard({required this.listing, this.score, this.onReturned});
   final JsonMap listing;
   final double? score;
+  final VoidCallback? onReturned;
   @override
   Widget build(BuildContext context) => SoftCard(
-    onTap: () => pushPage(context, ItemDetailPage(listing: listing)),
+    onTap: () async {
+      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ItemDetailPage(listing: listing)));
+      if (context.mounted) onReturned?.call();
+    },
     child: Row(
       children: [
         SizedBox(

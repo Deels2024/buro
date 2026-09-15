@@ -9,6 +9,7 @@ class BureauPage extends StatelessWidget {
     required this.child,
     this.subtitle,
     this.actions,
+    this.leading,
     this.bottom,
     this.padding = const EdgeInsets.fromLTRB(20, 8, 20, 28),
   });
@@ -17,6 +18,7 @@ class BureauPage extends StatelessWidget {
   final String? subtitle;
   final Widget child;
   final List<Widget>? actions;
+  final Widget? leading;
   final Widget? bottom;
   final EdgeInsets padding;
 
@@ -24,6 +26,7 @@ class BureauPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: leading,
         toolbarHeight: (subtitle == null
             ? MediaQuery.textScalerOf(context).scale(28) + 24
             : MediaQuery.textScalerOf(context).scale(26) +

@@ -225,8 +225,15 @@ services:
       MINIO_PASSWORD: "${MINIO_PASSWORD}"
     restart: "no"
 
+  openclip-cache-init:
+    image: alpine:3.20
+    volumes:
+      - openclip_cache:/cache
+    command: ["sh", "-eu", "-c", "chown -R 10002:10002 /cache"]
+    restart: "no"
+
   openclip:
-    profiles: ["ai"]
+    image: bureau/openclip:${BN_RELEASE_SHA:-local}
     build: ./backend/openclip_service
     environment:
       OPENCLIP_MODEL: ViT-B-32
@@ -234,6 +241,15 @@ services:
       OPENCLIP_ALLOWED_IMAGE_HOSTS: minio,localhost,127.0.0.1
     volumes:
       - openclip_cache:/home/openclip/.cache
+    depends_on:
+      openclip-cache-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 60
+      start_period: 60s
     restart: unless-stopped
 
 volumes:

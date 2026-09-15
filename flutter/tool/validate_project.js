@@ -5,6 +5,8 @@ const path = require('path');
 
 require('./pwa_launch_test.js');
 require('./push_test.js');
+require('./yandex_map_test.js');
+require('./map_bridge_test.js');
 
 const root = path.resolve(__dirname, '..');
 const requiredFiles = [

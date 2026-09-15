@@ -800,6 +800,10 @@ class BureauApiClient {
 
   Future<List<JsonMap>> supportTickets() async =>
       _maps(await request('GET', '/support/tickets'));
+  Future<JsonMap> createGuestSupportTicket(JsonMap body) async =>
+      _map(await request('POST', '/support/guest', body: body, authenticated: false, idempotencyKey: newIdempotencyKey()));
+  Future<JsonMap> supportTicket(String id) async =>
+      _map(await request('GET', '/support/tickets/$id'));
   Future<JsonMap> createSupportTicket(JsonMap body) async => _map(
     await request(
       'POST',

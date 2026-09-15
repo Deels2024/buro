@@ -339,7 +339,8 @@ class PushDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class SupportTicket(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "support_tickets"
 
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    guest_contact_cipher: Mapped[str | None] = mapped_column(Text)
     organization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="SET NULL"), index=True
     )
@@ -357,7 +358,7 @@ class SupportMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (Index("ix_support_messages_ticket_created", "ticket_id", "created_at"),)
 
     ticket_id: Mapped[UUID] = mapped_column(ForeignKey("support_tickets.id", ondelete="CASCADE"), index=True)
-    sender_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    sender_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     body_cipher: Mapped[str] = mapped_column(Text)
     attachment_ids: Mapped[list] = mapped_column(JSON, default=list)
     internal: Mapped[bool] = mapped_column(Boolean, default=False)

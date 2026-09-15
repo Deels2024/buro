@@ -63,6 +63,53 @@ async def photo(sessions, owner, purpose='listing'):
         return str(media.id)
 
 
+async def test_guest_support_reaches_admin_without_exposing_contact_or_creating_user(workflow):
+    from app.db.models import SupportMessage, SupportTicket
+
+    client, sessions, users, headers = workflow
+    payload = {'contact': 'help@example.org', 'subject': 'Не приходит SMS',
+               'message': 'Не получается получить код для входа в аккаунт.'}
+    response = await client.post('/v1/support/guest', json=payload)
+    assert response.status_code == 201, response.text
+    receipt = response.json()
+    assert set(receipt) == {'id', 'message'}
+    assert response.headers['cache-control'] == 'no-store'
+    ticket_id = receipt['id']
+    async with sessions() as db:
+        ticket = await db.get(SupportTicket, UUID(ticket_id))
+        assert ticket.user_id is None
+        assert payload['contact'] not in ticket.guest_contact_cipher
+        assert decrypt_json(ticket.guest_contact_cipher)['contact'] == payload['contact']
+        message = await db.scalar(select(SupportMessage).where(SupportMessage.ticket_id == ticket.id))
+        assert message.sender_id is None and payload['message'] not in message.body_cipher
+        assert len(list(await db.scalars(select(User)))) == len(users)
+    assert (await client.get(f'/v1/support/tickets/{ticket_id}')).status_code == 401
+    assert (await client.get(f'/v1/support/tickets/{ticket_id}', headers=headers('stranger'))).status_code == 403
+    assert (await client.get(f'/v1/admin/support/tickets/{ticket_id}', headers=headers('stranger'))).status_code == 403
+    admin = await client.get(f'/v1/admin/support/tickets/{ticket_id}', headers=headers('admin'))
+    assert admin.status_code == 200 and admin.json()['guest_contact'] == payload['contact']
+    assert admin.headers['cache-control'] == 'no-store'
+    messages = await client.get(f'/v1/support/tickets/{ticket_id}/messages', headers=headers('admin'))
+    assert messages.json()[0]['body'] == payload['message']
+    # The UI must not claim to send a reply to a guest with no authenticated inbox.
+    path = f'/v1/support/tickets/{ticket_id}/messages'
+    assert (await client.post(path, headers=headers('admin'), json={'body': 'Ответ', 'internal': False})).status_code == 422
+    assert (await client.post(path, headers=headers('admin'), json={'body': 'Связались по почте', 'internal': True})).status_code == 201
+
+
+async def test_guest_support_validates_and_limits_contact(workflow):
+    client, _, _, _ = workflow
+    payload = {'contact': 'not-an-address', 'subject': 'Ошибка', 'message': 'Не могу войти в приложение.'}
+    assert (await client.post('/v1/support/guest', json=payload)).status_code == 422
+    payload['contact'] = '+7 (999) 123-45-67'
+    payload['subject'] = '   '
+    assert (await client.post('/v1/support/guest', json=payload)).status_code == 422
+    payload['subject'] = 'Ошибка входа'
+    for _ in range(3):
+        assert (await client.post('/v1/support/guest', json=payload)).status_code == 201
+    assert (await client.post('/v1/support/guest', json=payload)).status_code == 429
+
+
 def listing_body(**extra):
     return {'kind':'found', 'title':'Рюкзак <script>alert(1)</script>', 'description':'Чёрный рюкзак с красной молнией.', 'category':'Сумки', 'tags':[], 'hidden_features':['secret-zip'], 'public_features':[], 'event_at':datetime.now(UTC).isoformat(), 'location':{'region':'Москва','latitude':55.753,'longitude':37.615}, 'storage_code':'PRIVATE-104', **extra}
 

@@ -21,6 +21,20 @@ const stateLabels = <String, String>{
   'needs_more_info':'Нужны уточнения', 'rejected':'Отклонено', 'closed':'Закрыто',
   'completed':'Вещь возвращена', 'paused':'Приостановлено', 'blocked':'Заблокировано',
   'changes_requested':'Нужны исправления', 'ready':'Проверено', 'processing':'Проверяется',
+  'open':'Открыто', 'waiting_user':'Ожидает вашего ответа', 'in_progress':'В работе',
+  'resolved':'Решено', 'verified':'Проверена', 'deleted':'Удалено',
+};
+const supportCategoryLabels = <String, String>{
+  'search': 'Поиск вещи', 'claim': 'Подтверждение владельца', 'handover': 'Передача вещи',
+  'organization': 'Организация', 'billing': 'Оплата', 'technical': 'Техническая проблема', 'other': 'Другое',
+};
+const roleLabels = <String, String>{
+  'owner': 'Владелец', 'manager': 'Руководитель', 'operator': 'Сотрудник',
+  'viewer': 'Наблюдатель', 'user': 'Пользователь', 'moderator': 'Модератор', 'admin': 'Администратор',
+};
+String accessStateLabel(dynamic value) => switch (value) {
+  'active' => 'Активен', 'revoked' => 'Отозван', 'disabled' => 'Отключён',
+  _ => stateLabel(value),
 };
 String stateLabel(dynamic value) => stateLabels[value?.toString()] ?? value?.toString() ?? '';
 int matchPercent(dynamic value) {
@@ -167,4 +181,3 @@ class _ScanHandoverPageState extends State<ScanHandoverPage> {
     const Text('Разрешите доступ к камере. Если камера недоступна, закройте экран и введите код вручную.'),
   ]));
 }
-

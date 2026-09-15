@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -475,6 +476,32 @@ class SupportTicketCreate(APIModel):
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=5)
 
 
+class GuestSupportCreate(APIModel):
+    contact: str = Field(min_length=5, max_length=254)
+    subject: str = Field(min_length=3, max_length=180)
+    message: str = Field(min_length=10, max_length=4000)
+
+    @field_validator("contact", "subject", "message", mode="before")
+    @classmethod
+    def trim(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("contact")
+    @classmethod
+    def validate_contact(cls, value: str) -> str:
+        phone = re.sub(r"[\s()\-]", "", value)
+        if re.fullmatch(r"\+?\d{10,15}", phone):
+            return phone
+        if re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+            return value
+        raise ValueError("Укажите телефон с кодом страны или адрес электронной почты")
+
+
+class GuestSupportReceipt(APIModel):
+    id: UUID
+    message: str
+
+
 class SupportMessageCreate(APIModel):
     body: str = Field(min_length=1, max_length=4000)
     attachment_ids: list[UUID] = Field(default_factory=list, max_length=5)
@@ -484,7 +511,7 @@ class SupportMessageCreate(APIModel):
 class SupportMessageOut(APIModel):
     id: UUID
     ticket_id: UUID
-    sender_id: UUID
+    sender_id: UUID | None
     body: str
     attachment_ids: list[UUID]
     internal: bool
@@ -493,7 +520,7 @@ class SupportMessageOut(APIModel):
 
 class SupportTicketOut(APIModel):
     id: UUID
-    user_id: UUID
+    user_id: UUID | None
     organization_id: UUID | None
     subject: str
     category: str
@@ -504,6 +531,10 @@ class SupportTicketOut(APIModel):
     resolved_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class AdminSupportTicketOut(SupportTicketOut):
+    guest_contact: str | None = None
 
 
 class SupportTicketUpdate(APIModel):
