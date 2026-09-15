@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../core/push_notifications.dart';
 
 import 'api_config.dart';
 import 'bureau_api_client.dart';
@@ -146,7 +147,17 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _disablePush() async {
+    try {
+      final id = await unsubscribePush().timeout(const Duration(seconds: 8));
+      if (id.isNotEmpty) await api.request('DELETE', '/users/me/devices/$id').timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // Logout remains possible offline; browser unsubscribe is attempted first.
+    }
+  }
+
   Future<void> logout() async {
+    await _disablePush();
     await api.logout();
     currentUser = null;
     organizations = const [];
@@ -158,6 +169,7 @@ class AppController extends ChangeNotifier {
   // Explicit recovery when a saved session cannot be read. This only forgets
   // this device's credentials; it cannot revoke an unreadable server session.
   Future<void> resetSavedSession() async {
+    await _disablePush();
     await api.tokenStore.write(null);
     currentUser = null;
     organizations = const [];

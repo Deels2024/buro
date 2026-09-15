@@ -750,6 +750,82 @@
         ]
       }
     },
+    "/v1/users/me/push/config": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Push Config",
+        "operationId": "push_config_v1_users_me_push_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Push Config V1 Users Me Push Config Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/users/me/push/subscription": {
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Subscribe Push",
+        "operationId": "subscribe_push_v1_users_me_push_subscription_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebPushSubscription"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushDeviceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/users/me/devices/{device_id}": {
       "delete": {
         "tags": [
@@ -10013,6 +10089,44 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WebPushKeys": {
+        "properties": {
+          "p256dh": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "P256Dh"
+          },
+          "auth": {
+            "type": "string",
+            "maxLength": 30,
+            "title": "Auth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "title": "WebPushKeys"
+      },
+      "WebPushSubscription": {
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 3000,
+            "title": "Endpoint"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/WebPushKeys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "title": "WebPushSubscription"
       },
       "WebhookCreate": {
         "properties": {

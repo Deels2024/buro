@@ -449,6 +449,16 @@ class PushDeviceOut(APIModel):
     last_seen_at: datetime | None
 
 
+class WebPushKeys(APIModel):
+    p256dh: str = Field(max_length=100)
+    auth: str = Field(max_length=30)
+
+
+class WebPushSubscription(APIModel):
+    endpoint: str = Field(max_length=3000)
+    keys: WebPushKeys
+
+
 class SessionOut(APIModel):
     id: UUID
     device_name: str | None

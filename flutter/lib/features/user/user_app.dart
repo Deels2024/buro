@@ -1,5 +1,6 @@
 import '../../core/location_editor.dart';
 import '../../core/brand_artwork.dart';
+import '../../core/push_settings_card.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -396,6 +397,7 @@ class _UserShellState extends State<UserShell> {
       if (action == 'claim' && id != null) target = MatchFlowPage(listingId: id);
       if (action == 'listing' && id != null) target = ItemDetailPage(listingId: id);
       if (action == 'support') target = const SupportCreatePage();
+      if (action == 'notifications') target = const NotificationsPage();
       if (action == 'organization') target = const OrganizationAuthPage();
       if (target != null) pushPage(context, target);
     });
@@ -1664,7 +1666,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   @override
   Widget build(BuildContext context) => BureauPage(
     title: 'Уведомления',
-    subtitle: 'События из backend',
+    subtitle: 'Совпадения и ответы по вашим вещам',
     actions: [
       IconButton(
         onPressed: () async {
@@ -1674,7 +1676,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
         icon: const Icon(Icons.done_all_rounded),
       ),
     ],
-    child: ApiFutureBuilder<List<JsonMap>>(
+    child: Column(children: [
+      const PushSettingsCard(),
+      const SizedBox(height: 12),
+      ApiFutureBuilder<List<JsonMap>>(
       future: _future,
       empty: const NoticeCard('Новых уведомлений нет.'),
       builder: (context, items) => Column(
@@ -1704,6 +1709,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ],
       ),
     ),
+    ]),
   );
 }
 
