@@ -55,6 +55,20 @@ abstract interface class BureauTokenStore {
   Future<void> write(BureauTokens? tokens);
 }
 
+// The browser persists its refresh credential in a server-set HttpOnly cookie.
+// Access credentials are deliberately recreated when the PWA starts again.
+class MemoryBureauTokenStore implements BureauTokenStore {
+  BureauTokens? _tokens;
+
+  @override
+  Future<BureauTokens?> read() async => _tokens;
+
+  @override
+  Future<void> write(BureauTokens? tokens) async {
+    _tokens = tokens;
+  }
+}
+
 class UploadedMedia {
   const UploadedMedia({
     required this.id,
@@ -77,14 +91,19 @@ class BureauApiClient {
   BureauApiClient({
     required String baseUrl,
     required this.tokenStore,
+    this.browserSession = false,
+    this.legacyTokenStore,
     http.Client? httpClient,
   }) : baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
        _http = httpClient ?? http.Client();
 
   final String baseUrl;
   final BureauTokenStore tokenStore;
+  final bool browserSession;
+  final BureauTokenStore? legacyTokenStore;
   final http.Client _http;
   Future<BureauTokens>? _refreshInFlight;
+  int _sessionEpoch = 0;
 
   Uri _uri(String path, [Map<String, Object?>? query]) {
     final uri = Uri.parse('$baseUrl${path.startsWith('/') ? path : '/$path'}');
@@ -110,6 +129,9 @@ class BureauApiClient {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     final headers = <String, String>{'Accept': 'application/json'};
+    if (browserSession && path.startsWith('/auth/')) {
+      headers['X-Bureau-Web-Session'] = '1';
+    }
     if (body != null) {
       headers['Content-Type'] = 'application/json; charset=utf-8';
     }
@@ -215,6 +237,24 @@ class BureauApiClient {
   Future<BureauTokens> _refresh() async {
     if (_refreshInFlight != null) return _refreshInFlight!;
     final future = () async {
+      if (browserSession) {
+        final epoch = _sessionEpoch;
+        try {
+          final json = _map(await request('POST', '/auth/session',
+            body: const {}, authenticated: false, retry401: false));
+          if (epoch != _sessionEpoch) {
+            throw BureauApiException(401, 'Сессия изменилась');
+          }
+          final tokens = _newTokens(json);
+          await tokenStore.write(tokens);
+          return tokens;
+        } on BureauApiException catch (error) {
+          if (error.isUnauthorized && epoch == _sessionEpoch) {
+            await tokenStore.write(null);
+          }
+          rethrow;
+        }
+      }
       var current = await tokenStore.read();
       if (current == null) throw BureauApiException(401, 'Сессия отсутствует');
       // Persist a random retry credential before rotating. Reopening after a
@@ -257,6 +297,36 @@ class BureauApiClient {
       return await future;
     } finally {
       _refreshInFlight = null;
+    }
+  }
+
+  Future<BureauTokens?> restoreSession() async {
+    if (!browserSession) return tokenStore.read();
+    try {
+      return await _refresh();
+    } on BureauApiException catch (error) {
+      // An offline launch is recoverable, not a reason to ask for another SMS.
+      if (!error.isUnauthorized) rethrow;
+    }
+    // Migrate an existing encrypted browser session once, without another SMS.
+    var legacy = await legacyTokenStore?.read();
+    if (legacy == null) return null;
+    if (legacy.refreshOperation == null) {
+      legacy = BureauTokens(legacy.accessToken, legacy.refreshToken, legacy.expiresIn,
+        refreshOperation: newIdempotencyKey());
+      await legacyTokenStore!.write(legacy);
+    }
+    try {
+      final json = _map(await request('POST', '/auth/refresh',
+        body: {'refresh_token': legacy.refreshToken},
+        refreshOperation: legacy.refreshOperation,
+        authenticated: false, retry401: false));
+      await acceptTokens(json);
+      return tokenStore.read();
+    } on BureauApiException catch (error) {
+      if (!error.isUnauthorized) rethrow;
+      await legacyTokenStore!.write(null);
+      return null;
     }
   }
 
@@ -305,8 +375,18 @@ class BureauApiClient {
   Future<JsonMap> updateMe(String name) async =>
       _map(await request('PATCH', '/users/me', body: {'display_name': name}));
 
-  Future<void> acceptTokens(JsonMap json) async =>
-      tokenStore.write(_newTokens(json));
+  Future<void> acceptTokens(JsonMap json) async {
+    _sessionEpoch++;
+    await tokenStore.write(_newTokens(json));
+    if (browserSession) {
+      try {
+        await legacyTokenStore?.write(null);
+      } catch (_) {
+        // The new credential is already durable in the HttpOnly cookie. An
+        // unavailable legacy store must not undo a completed SMS login.
+      }
+    }
+  }
 
   BureauTokens _newTokens(JsonMap json) {
     final tokens = BureauTokens.fromJson(json);
@@ -315,6 +395,10 @@ class BureauApiClient {
   }
 
   Future<void> logout() async {
+    if (browserSession) {
+      await forgetSession();
+      return;
+    }
     final tokens = await tokenStore.read();
     try {
       if (tokens != null) {
@@ -328,6 +412,18 @@ class BureauApiClient {
     } finally {
       await tokenStore.write(null);
     }
+  }
+
+  Future<void> forgetSession() async {
+    if (browserSession) {
+      _sessionEpoch++;
+      // HttpOnly cookies must be cleared by the server. Do not report a
+      // successful logout offline and silently sign back in on the next run.
+      await request('DELETE', '/auth/session',
+        authenticated: false, retry401: false);
+      await legacyTokenStore?.write(null);
+    }
+    await tokenStore.write(null);
   }
 
   Future<JsonMap> search({

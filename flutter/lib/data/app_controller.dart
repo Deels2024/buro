@@ -14,7 +14,9 @@ class AppController extends ChangeNotifier {
           api ??
           BureauApiClient(
             baseUrl: ApiConfig.baseUrl,
-            tokenStore: SecureBureauTokenStore(),
+            tokenStore: kIsWeb ? MemoryBureauTokenStore() : SecureBureauTokenStore(),
+            browserSession: kIsWeb,
+            legacyTokenStore: kIsWeb ? SecureBureauTokenStore() : null,
           );
 
   final BureauApiClient api;
@@ -42,7 +44,7 @@ class AppController extends ChangeNotifier {
       lastError = _message(error);
     }
     try {
-      final tokens = await api.tokenStore.read();
+      final tokens = await api.restoreSession();
       if (tokens == null) {
         state = AppSessionState.signedOut;
         notifyListeners();
@@ -166,11 +168,11 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Explicit recovery when a saved session cannot be read. This only forgets
-  // this device's credentials; it cannot revoke an unreadable server session.
+  // Explicit recovery also revokes the browser cookie, even if the old
+  // JavaScript storage cannot be read.
   Future<void> resetSavedSession() async {
     await _disablePush();
-    await api.tokenStore.write(null);
+    await api.forgetSession();
     currentUser = null;
     organizations = const [];
     selectedOrganization = null;
