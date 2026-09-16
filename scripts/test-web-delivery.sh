@@ -35,6 +35,22 @@ docker compose -f docker-compose.yml up -d --no-build --wait --wait-timeout 180 
 ./scripts/check-release.sh "$release"
 docker compose exec -T web sh -c \
   'test "$(cat /usr/share/nginx/html/release-sha.txt)" = "$1" && test -s /usr/share/nginx/html/main.dart.js' sh "$release"
+# A previously cached iframe must not receive 304 from normalized archive mtimes.
+docker compose exec -T api python - <<'PY'
+from urllib.request import Request, urlopen
+
+for headers in [
+    {'If-Modified-Since': 'Thu, 01 Jan 2099 00:00:00 GMT'},
+    {'If-None-Match': '"0-38a"'},
+]:
+    request = Request('http://web/yandex-map.html?v=2', headers=headers)
+    with urlopen(request, timeout=10) as response:
+        assert response.status == 200
+        assert 'no-store' in response.headers.get('Cache-Control', '')
+        assert response.headers.get('ETag') is None
+        assert 'id="retry"' in response.read().decode()
+print('Map iframe upgrade delivery passed.')
+PY
 # A legacy forced command leaves BN_RELEASE_SHA unset and uses :local tags.
 # The API/worker must still identify the baked commit and become healthy.
 docker compose stop worker

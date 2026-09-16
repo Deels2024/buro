@@ -80,7 +80,8 @@ class _YandexMapState extends State<_YandexMap> {
       // Flutter creates the element before attaching it to the DOM. Re-send
       // on load as well as ready, so a missed handshake cannot leave it blank.
       frame.addEventListener('load', _loaded);
-      frame.src = Uri.base.resolve('yandex-map.html').toString();
+      // A versioned URL also refreshes HTML cached before no-store was added.
+      frame.src = Uri.base.resolve('yandex-map.html?v=2').toString();
     },
   ));
 }
