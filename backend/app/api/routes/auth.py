@@ -3,9 +3,10 @@ import logging
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from typing import Annotated
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from sqlalchemy import select, update
 
 from app.api.deps import DB, CurrentUser
@@ -48,6 +49,40 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 OTP_RESEND_COOLDOWN_SECONDS = 60
+WEB_SESSION_COOKIE = "__Host-bureau_session"
+
+
+def _browser_session_request(request: Request, *, required: bool = False) -> bool:
+    opted_in = request.headers.get("x-bureau-web-session") == "1"
+    # Cookie credentials are accepted only from the app's exact origin, with a
+    # non-simple header. SameSite alone is insufficient against sibling hosts.
+    if not opted_in:
+        if required:
+            raise HTTPException(status_code=403, detail="Недопустимый запрос сессии")
+        return False
+    public = urlsplit(settings.public_api_url)
+    origin = f"{public.scheme}://{public.netloc}"
+    if request.headers.get("origin") != origin:
+        raise HTTPException(status_code=403, detail="Недопустимый источник запроса")
+    return True
+
+
+def _browser_tokens(tokens: TokenPair, request: Request, response: Response) -> TokenPair:
+    if _browser_session_request(request):
+        response.set_cookie(
+            WEB_SESSION_COOKIE, tokens.refresh_token,
+            max_age=settings.refresh_token_days * 86400,
+            secure=True, httponly=True, samesite="strict", path="/",
+        )
+        response.headers["Cache-Control"] = "no-store"
+    return tokens
+
+
+def _browser_refresh_operation(raw: str) -> str:
+    # Survives a killed PWA or lost response without relying on localStorage.
+    return hash_secret(f"browser-refresh-operation:v1:{raw}")
+
+
 _TRUSTED_PROXY_NETWORKS = tuple(
     ip_network(network)
     for network in (
@@ -192,7 +227,8 @@ async def request_code(payload: PhoneCodeRequest, request: Request) -> PhoneCode
 
 
 @router.post("/verify-code", response_model=TokenPair | MFARequired)
-async def verify_code(payload: PhoneCodeVerify, db: DB) -> TokenPair | MFARequired:
+async def verify_code(payload: PhoneCodeVerify, db: DB, request: Request, response: Response) -> TokenPair | MFARequired:
+    _browser_session_request(request)
     try:
         phone = normalize_phone(payload.phone)
     except ValueError as exc:
@@ -243,11 +279,12 @@ async def verify_code(payload: PhoneCodeVerify, db: DB) -> TokenPair | MFARequir
 
     raw_refresh, _ = await _store_refresh(db, user, payload.device_name)
     await db.commit()
-    return _tokens(user, raw_refresh)
+    return _browser_tokens(_tokens(user, raw_refresh), request, response)
 
 
 @router.post("/verify-admin-2fa", response_model=TokenPair)
-async def verify_admin_2fa(payload: MFAVerifyRequest, db: DB) -> TokenPair:
+async def verify_admin_2fa(payload: MFAVerifyRequest, db: DB, request: Request, response: Response) -> TokenPair:
+    _browser_session_request(request)
     raw = await redis.getdel(f"admin-mfa:{payload.mfa_ticket}")
     if not raw:
         raise HTTPException(status_code=400, detail="Проверка истекла")
@@ -263,7 +300,7 @@ async def verify_admin_2fa(payload: MFAVerifyRequest, db: DB) -> TokenPair:
         db, user, payload.device_name or ticket.get("device_name"), mfa=True
     )
     await db.commit()
-    return _tokens(user, raw_refresh, mfa=True)
+    return _browser_tokens(_tokens(user, raw_refresh, mfa=True), request, response)
 
 
 @router.post("/admin-2fa/setup", response_model=TOTPSetupOut)
@@ -313,9 +350,10 @@ async def disable_admin_2fa(payload: TOTPEnableRequest, user: CurrentUser, db: D
 
 @router.post("/refresh", response_model=TokenPair)
 async def refresh(
-    payload: RefreshRequest, db: DB,
+    payload: RefreshRequest, db: DB, request: Request, response: Response,
     operation: Annotated[str | None, Header(alias="X-Refresh-Operation", min_length=32, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")] = None,
 ) -> TokenPair:
+    _browser_session_request(request)
     token_hash = hash_secret(payload.refresh_token)
     recovery_key = "refresh:recovery:" + hash_secret(f"{token_hash}|{operation}") if operation else None
     # A domain-separated HMAC reproduces only this operation's successor. Its
@@ -367,12 +405,47 @@ async def refresh(
     if user.role in {"admin", "moderator"} and user.admin_2fa_enabled and not record.mfa_verified:
         raise HTTPException(status_code=401, detail="Требуется двухфакторная авторизация")
     if recovered_raw:
-        return _tokens(user, recovered_raw, mfa=record.mfa_verified)
+        return _browser_tokens(_tokens(user, recovered_raw, mfa=record.mfa_verified), request, response)
     raw_refresh, _ = await _store_refresh(
         db, user, payload.device_name or record.device_name, mfa=record.mfa_verified, raw=successor
     )
     await db.commit()
-    return _tokens(user, raw_refresh, mfa=record.mfa_verified)
+    return _browser_tokens(_tokens(user, raw_refresh, mfa=record.mfa_verified), request, response)
+
+
+@router.post("/session", response_model=TokenPair)
+async def restore_browser_session(request: Request, response: Response, db: DB) -> TokenPair:
+    _browser_session_request(request, required=True)
+    raw = request.cookies.get(WEB_SESSION_COOKIE)
+    if not raw or len(raw) > 256:
+        raise HTTPException(status_code=401, detail="Сессия отсутствует")
+    return await refresh(
+        RefreshRequest(refresh_token=raw), db, request, response,
+        operation=_browser_refresh_operation(raw),
+    )
+
+
+@router.delete("/session", response_model=MessageResponse)
+async def forget_browser_session(request: Request, response: Response, db: DB) -> MessageResponse:
+    _browser_session_request(request, required=True)
+    raw = request.cookies.get(WEB_SESSION_COOKIE)
+    if raw and len(raw) <= 256:
+        token_hash = hash_secret(raw)
+        user_id = await db.scalar(select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash))
+        if user_id:
+            # Use the same lock as refresh, including a successor whose
+            # Set-Cookie response may have been lost when the app was closed.
+            await db.scalar(select(User).where(User.id == user_id).with_for_update())
+            successor = hash_secret(f"refresh-successor:v1:{token_hash}:{_browser_refresh_operation(raw)}")
+            await db.execute(update(RefreshToken).where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_hash.in_([token_hash, hash_secret(successor)]),
+                RefreshToken.revoked_at.is_(None),
+            ).values(revoked_at=datetime.now(UTC)))
+            await db.commit()
+    response.delete_cookie(WEB_SESSION_COOKIE, secure=True, httponly=True, samesite="strict", path="/")
+    response.headers["Cache-Control"] = "no-store"
+    return MessageResponse(message="Сессия завершена")
 
 
 @router.post("/logout", response_model=MessageResponse)

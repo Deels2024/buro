@@ -3,6 +3,13 @@
 <head>
   <base href="$FLUTTER_BASE_HREF">
   <meta charset="UTF-8">
+  <script>
+    // Old home-screen shortcuts must not keep logging in over plain HTTP.
+    if (location.protocol === 'http:' &&
+        ['edinburo.ru', 'www.edinburo.ru', '5.183.191.139'].includes(location.hostname)) {
+      location.replace('https://edinburo.ru' + location.pathname + location.search + location.hash);
+    }
+  </script>
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Бюро находок — единый сервис поиска и возврата потерянных вещей по всей России. Публикуйте пропажи и находки, находите совпадения и безопасно возвращайте вещи владельцам.">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">

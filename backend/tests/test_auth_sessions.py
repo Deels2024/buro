@@ -1,6 +1,7 @@
 import asyncio
 import os
 from datetime import UTC, datetime, timedelta
+from http.cookiejar import MozillaCookieJar
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.routes import admin, auth
+from app.core.config import settings
 from app.core.security import create_access_token, encrypt_json, hash_secret, phone_lookup_hash
 from app.core.totp import generate_totp_secret, totp_code
 from app.db.base import Base
@@ -17,6 +19,130 @@ from app.db.models import RefreshToken, User
 from app.db.session import get_db
 from app.main import app
 from app.services import cache
+
+
+@pytest.fixture
+async def browser_app(session_app, monkeypatch):
+    client, sessions, fake = session_app
+    monkeypatch.setattr(settings, "public_api_url", "https://test/v1")
+    client.base_url = "https://test"
+    client.headers.update({"Origin": "https://test", "X-Bureau-Web-Session": "1"})
+    return client, sessions, fake
+
+
+async def browser_login(client, user):
+    await cache.set_json("otp:" + user.phone_hash, {"hash": hash_secret("123456"), "attempts": 0}, 300)
+    return await client.post("/v1/auth/verify-code", json={"phone": "+79991234567", "code": "123456"})
+
+
+async def test_browser_sms_session_survives_process_restart_without_local_storage(browser_app, tmp_path):
+    client, sessions, _ = browser_app
+    user = await add_user(sessions)
+    login = await browser_login(client, user)
+    assert login.status_code == 200
+    cookie = login.headers["set-cookie"]
+    for flag in ("HttpOnly", "Secure", "SameSite=strict", "Path=/", "Max-Age=2592000"):
+        assert flag in cookie
+    assert "Domain=" not in cookie
+    assert login.headers["cache-control"] == "no-store"
+    # Simulate a closed browser: only persistent cookies survive disk save/load;
+    # no bearer token, localStorage, crypto key or live API client is retained.
+    saved = MozillaCookieJar(str(tmp_path / "cookies.txt"))
+    for item in client.cookies.jar:
+        saved.set_cookie(item)
+    saved.save()
+    restored = MozillaCookieJar(saved.filename)
+    restored.load()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test", cookies=restored,
+        headers={"Origin": "https://test", "X-Bureau-Web-Session": "1"}) as reopened:
+        response = await reopened.post("/v1/auth/session")
+        assert response.status_code == 200
+        me = await reopened.get("/v1/users/me", headers={"Authorization": "Bearer " + response.json()["access_token"]})
+        assert me.status_code == 200 and me.json()["id"] == str(user.id)
+        assert response.json()["refresh_token"] != login.json()["refresh_token"]
+
+
+async def test_browser_lost_response_recovers_and_logout_revokes_successor(browser_app):
+    client, sessions, _ = browser_app
+    user = await add_user(sessions)
+    login = await browser_login(client, user)
+    old_cookie = {"Cookie": auth.WEB_SESSION_COOKIE + "=" + login.json()["refresh_token"]}
+    first = await client.post("/v1/auth/session", headers=old_cookie)
+    recovered = await client.post("/v1/auth/session", headers=old_cookie)
+    assert first.status_code == recovered.status_code == 200
+    assert first.json()["refresh_token"] == recovered.json()["refresh_token"]
+    logout = await client.delete("/v1/auth/session", headers=old_cookie)
+    assert logout.status_code == 200
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert (await client.post("/v1/auth/session", headers=old_cookie)).status_code == 401
+    successor_cookie = {"Cookie": auth.WEB_SESSION_COOKIE + "=" + first.json()["refresh_token"]}
+    assert (await client.post("/v1/auth/session", headers=successor_cookie)).status_code == 401
+    assert (await client.post("/v1/auth/session")).status_code == 401
+
+
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+@pytest.mark.parametrize("overrides", [
+    {"Origin": "https://evil.test"}, {"Origin": "https://admin.test"},
+    {"Origin": "null"}, {"Origin": ""}, {"X-Bureau-Web-Session": ""},
+])
+async def test_browser_cookie_requires_exact_origin_and_explicit_header(browser_app, method, overrides):
+    client, sessions, _ = browser_app
+    user = await add_user(sessions)
+    assert (await browser_login(client, user)).status_code == 200
+    response = await client.request(method, "/v1/auth/session", headers=overrides)
+    assert response.status_code == 403
+    assert "set-cookie" not in response.headers
+    assert (await client.post("/v1/auth/session")).status_code == 200
+
+
+@pytest.mark.parametrize("state", ["expired", "revoked", "blocked", "mfa-required"])
+async def test_browser_cookie_does_not_bypass_session_revocation(browser_app, state):
+    client, sessions, _ = browser_app
+    user = await add_user(sessions)
+    login = await browser_login(client, user)
+    async with sessions() as db:
+        record = await db.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_secret(login.json()["refresh_token"])))
+        saved = await db.get(User, user.id)
+        if state == "expired":
+            record.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        elif state == "revoked":
+            record.revoked_at = datetime.now(UTC)
+        elif state == "blocked":
+            saved.status = "blocked"
+        else:
+            saved.role = "admin"
+            saved.admin_2fa_enabled = True
+        await db.commit()
+    assert (await client.post("/v1/auth/session")).status_code == 401
+
+
+async def test_existing_browser_token_migrates_without_another_sms(browser_app):
+    client, sessions, _ = browser_app
+    user = await add_user(sessions)
+    old = await add_refresh(sessions, user)
+    migrated = await client.post("/v1/auth/refresh", json={"refresh_token": old}, headers={"X-Refresh-Operation": uuid4().hex})
+    assert migrated.status_code == 200 and auth.WEB_SESSION_COOKIE in client.cookies
+    assert (await client.post("/v1/auth/session")).status_code == 200
+
+
+async def test_admin_browser_cookie_is_issued_only_after_2fa(browser_app):
+    client, sessions, _ = browser_app
+    secret = generate_totp_secret()
+    user = await add_user(sessions, role="admin", admin_2fa_enabled=True, admin_totp_secret_cipher=encrypt_json({"secret": secret}))
+    first = await browser_login(client, user)
+    assert first.json()["mfa_required"] is True
+    assert "set-cookie" not in first.headers
+    second = await client.post("/v1/auth/verify-admin-2fa", json={"mfa_ticket": first.json()["mfa_ticket"], "code": totp_code(secret)})
+    assert second.status_code == 200 and auth.WEB_SESSION_COOKIE in client.cookies
+    assert (await client.post("/v1/auth/session")).status_code == 200
+
+
+async def test_native_login_keeps_bearer_protocol_without_browser_cookie(session_app):
+    client, sessions, _ = session_app
+    user = await add_user(sessions)
+    login = await browser_login(client, user)
+    assert login.status_code == 200
+    assert "set-cookie" not in login.headers
 
 
 @pytest.fixture
