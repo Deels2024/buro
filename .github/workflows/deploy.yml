@@ -24,7 +24,7 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
-    # Flutter compilation happens in CI; the VPS downloads tested files.
+    # Flutter and Next.js compilation happen in CI; the VPS downloads tested files.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +39,11 @@ jobs:
       - name: Verify runtime is published before connecting to the VPS
         env:
           EXPECTED_RELEASE: ${{ github.event.workflow_run.head_sha || github.sha }}
-        run: >-
-          curl --fail --silent --show-error --location --max-time 30
-          "https://github.com/Deels2024/buro/releases/download/runtime-$EXPECTED_RELEASE/web.sha256"
+        run: |
+          for component in web admin; do
+            curl --fail --silent --show-error --location --max-time 30 \
+              "https://github.com/Deels2024/buro/releases/download/runtime-$EXPECTED_RELEASE/$component.sha256"
+          done
       - name: Configure deployment key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
