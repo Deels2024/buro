@@ -302,12 +302,14 @@ class BureauApiClient {
 
   Future<BureauTokens?> restoreSession() async {
     if (!browserSession) return tokenStore.read();
+    final epoch = _sessionEpoch;
     try {
       return await _refresh();
     } on BureauApiException catch (error) {
       // An offline launch is recoverable, not a reason to ask for another SMS.
       if (!error.isUnauthorized) rethrow;
     }
+    if (epoch != _sessionEpoch) return tokenStore.read();
     // Migrate an existing encrypted browser session once, without another SMS.
     var legacy = await legacyTokenStore?.read();
     if (legacy == null) return null;
@@ -322,7 +324,7 @@ class BureauApiClient {
         refreshOperation: legacy.refreshOperation,
         authenticated: false, retry401: false));
       await acceptTokens(json);
-      return tokenStore.read();
+      return await tokenStore.read();
     } on BureauApiException catch (error) {
       if (!error.isUnauthorized) rethrow;
       await legacyTokenStore!.write(null);

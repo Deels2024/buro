@@ -178,9 +178,11 @@ void main() {
   test('a late restore cannot undo an explicit logout', () async {
     final pending = Completer<http.Response>();
     final started = Completer<void>();
+    final legacy = LegacyStore()..value = tokens;
     final api = BureauApiClient(
       baseUrl: 'https://edinburo.ru/v1', tokenStore: MemoryBureauTokenStore(),
-      browserSession: true, httpClient: MockClient((request) async {
+      browserSession: true, legacyTokenStore: legacy,
+      httpClient: MockClient((request) async {
         if (request.method == 'DELETE') return response({'message': 'Signed out'});
         started.complete();
         return pending.future;
@@ -192,6 +194,7 @@ void main() {
     pending.complete(response(tokens.toJson()));
     expect(await restoring, isNull);
     expect(await api.tokenStore.read(), isNull);
+    expect(legacy.reads, 0);
     api.close();
   });
 }
