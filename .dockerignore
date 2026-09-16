@@ -7,10 +7,14 @@
 flutter/**
 !flutter/nginx-web.conf
 !flutter/Dockerfile.web
+!admin
+admin/**
+!admin/Dockerfile
 !scripts
 scripts/**
 !scripts/read-release-sha.sh
 !scripts/fetch-web-release.sh
+!scripts/fetch-admin-release.sh
 !.git
 .git/**
 !.git/HEAD

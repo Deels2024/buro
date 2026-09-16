@@ -1,6 +1,10 @@
-# Development/CI only: production's default Dockerfile downloads tested web files.
+# Development/CI only: production downloads the tested web and admin runtimes.
 services:
   web:
     build:
       context: ./flutter
       dockerfile: Dockerfile.web.source
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile.source

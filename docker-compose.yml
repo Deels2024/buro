@@ -46,7 +46,9 @@ services:
 
   admin:
     image: bureau/admin:${BN_RELEASE_SHA:-local}
-    build: ./admin
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
     environment:
       BUREAU_API_URL: http://api:8080/v1
       ADMIN_COOKIE_SECURE: "${ADMIN_COOKIE_SECURE:-false}"
