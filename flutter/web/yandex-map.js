@@ -2,7 +2,16 @@
 (() => {
   const status = document.getElementById('status');
   const locate = document.getElementById('locate');
-  const retry = document.getElementById('retry');
+  // Returning visitors can still have the previous iframe HTML in their cache.
+  // Keep the new script compatible with that document during an upgrade.
+  let retry = document.getElementById('retry');
+  if (!retry) {
+    retry = document.createElement('button');
+    retry.id = 'retry';
+    retry.hidden = true;
+    retry.textContent = 'Повторить загрузку карты';
+    document.getElementById('tools').appendChild(retry);
+  }
   let config, map, pin, loading = false, lastSelected = '', locating = false;
   let attempt = 0, handshakeTimer, handshakeDeadline;
   const send = data => parent.postMessage(JSON.stringify({source: 'bureau-yandex', ...data}), location.origin);

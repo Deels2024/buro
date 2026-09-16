@@ -5,11 +5,13 @@ const vm = require('node:vm');
 const {test} = require('node:test');
 const script = fs.readFileSync(path.join(__dirname, '../web/yandex-map.js'), 'utf8');
 
-function harness() {
+function harness({legacyHtml = false} = {}) {
   const handlers = {}, sent = [], scripts = [], timers = new Map();
   let nextTimer = 0, maps = 0;
   const element = () => ({hidden: true, textContent: '', addEventListener(name, fn) {this[name] = fn;}, remove() {}});
   const nodes = {status: element(), locate: element(), retry: element()};
+  if (legacyHtml) delete nodes.retry;
+  nodes.tools = {appendChild(node) {nodes[node.id] = node;}};
   const parent = {postMessage(data, origin) {assert.equal(origin, 'https://edinburo.ru'); sent.push(JSON.parse(data));}};
   const window = {addEventListener(name, fn) {handlers[name] = fn;}};
   const context = {document: {getElementById: id => nodes[id], createElement: element,
@@ -34,6 +36,19 @@ function harness() {
   };
 }
 const config = {source: 'bureau-flutter', key: 'test-key', editable: false, markers: []};
+
+test('a cached pre-upgrade document still connects and can retry a failed map load', () => {
+  const h = harness({legacyHtml: true});
+  assert.equal(h.sent[0].type, 'ready');
+  assert.equal(h.nodes.retry.textContent, 'Повторить загрузку карты');
+  h.message(config);
+  h.scripts[0].onerror();
+  assert.equal(h.nodes.retry.hidden, false);
+  h.nodes.retry.click();
+  h.sdk(); h.scripts[1].onload();
+  assert.equal(h.maps, 1);
+  assert.match(h.nodes.status.textContent, /Показаны приблизительные/);
+});
 
 test('lost initial ready is retried; missing configuration ends with an actionable error', () => {
   const h = harness();
