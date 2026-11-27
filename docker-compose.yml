@@ -139,92 +139,17 @@ services:
       redis:
         condition: service_healthy
       minio-init:
-        condition: service_completed_successfully
-      openai-secret-init:
-        condition: service_completed_successfully
-    volumes:
-      - openai_secret:/run/bureau-secrets
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/v1/health/ready', timeout=3)"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-    restart: unless-stopped
-
-  worker:
+    # Reuse the already-built backend image; no separate MinIO client pull.
     image: bureau/api:${BN_RELEASE_SHA:-local}
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    environment: *backend_environment
-    command: ["python", "-m", "app.worker"]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import redis; from app.core.config import settings; r=redis.Redis.from_url(settings.redis_url,decode_responses=True); assert (r.get('bureau:worker:heartbeat') or '').startswith(settings.release_sha+':')"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      # Allow the 120-second lease of a forcibly killed predecessor to expire.
-      start_period: 140s
-    depends_on:
-      api:
-        condition: service_healthy
-    restart: unless-stopped
-
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: bureau
-      POSTGRES_USER: bureau
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bureau -d bureau"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-    restart: unless-stopped
-
-  redis:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-    restart: unless-stopped
-
-  minio:
-    # Official MinIO registry; pin the tested release to avoid mutable tags.
-    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: bureau
-      MINIO_ROOT_PASSWORD: "${MINIO_PASSWORD}"
-      MINIO_API_CORS_ALLOW_ORIGIN: "${PUBLIC_BASE_URL:-http://localhost},${ADMIN_BASE_URL:-http://admin.localhost},https://edinburo.ru,https://admin.edinburo.ru"
-    ports:
-      - "${MINIO_BIND:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_BIND:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - minio_data:/data
-    restart: unless-stopped
-
-  minio-init:
-    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     depends_on:
       - minio
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        until mc alias set local http://minio:9000 bureau "$${MINIO_PASSWORD}"; do sleep 1; done
-        mc mb --ignore-existing local/bureau-media
-        mc anonymous set none local/bureau-media
+    entrypoint: ["python", "-m", "app.services.storage_bootstrap"]
     environment:
-      MINIO_PASSWORD: "${MINIO_PASSWORD}"
+      BN_S3_ENDPOINT: http://minio:9000
+      BN_S3_REGION: ru-central1
+      BN_S3_BUCKET: bureau-media
+      BN_S3_ACCESS_KEY: bureau
+      BN_S3_SECRET_KEY: "${MINIO_PASSWORD}"
     restart: "no"
 
   openclip-cache-init:
