@@ -76,20 +76,25 @@ void main() {
       posts.add(jsonDecode(request.body) as Object);
       return _json({'listing_id': 'item', 'completed_at': '2026-11-27T20:00:00Z'});
     }));
+    // The launch button spins behind the dialog until it closes.
     await tester.tap(find.text('Оформить выдачу без телефона'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     expect(find.textContaining('тестовая метка'), findsOneWidget);
     final submit = find.widgetWithText(FilledButton, 'Зафиксировать выдачу');
     expect(tester.widget<FilledButton>(submit).onPressed, isNull);
 
     await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.tap(find.text('Непубличная примета').last);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     expect(tester.widget<FilledButton>(submit).onPressed, isNull);
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.tap(submit);
     await tester.pumpAndSettle();
     expect(posts.single, {'verification': 'private_feature', 'confirmed': true});
