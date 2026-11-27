@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, CurrentUser
 from app.core.security import encrypt_json
-from app.db.models import Branch, Listing, MatchCandidate, MediaObject, OrganizationMember
+from app.db.models import Branch, CounterReturn, Listing, MatchCandidate, MediaObject, OrganizationMember
 from app.schemas import (
     AIDescribeRequest,
     AIItemDescription,
@@ -36,10 +36,9 @@ from app.services.webhooks import create_deliveries, enqueue_deliveries
 router = APIRouter()
 
 
-async def _get_listing(db: DB, listing_id: UUID) -> Listing:
-    listing = await db.scalar(
-        select(Listing).where(Listing.id == listing_id).options(selectinload(Listing.media))
-    )
+async def _get_listing(db: DB, listing_id: UUID, *, lock: bool = False) -> Listing:
+    query = select(Listing).where(Listing.id == listing_id).options(selectinload(Listing.media))
+    listing = await db.scalar(query.with_for_update() if lock else query)
     if not listing:
         raise HTTPException(status_code=404, detail="Публикация не найдена")
     return listing
@@ -206,8 +205,10 @@ async def managed_listing(listing_id: UUID, db: DB, user: CurrentUser, response:
 
 @router.patch("/{listing_id}", response_model=ManagedListingOut)
 async def update_listing(payload: ListingUpdate, listing_id: UUID, db: DB, user: CurrentUser, response: Response) -> ManagedListingOut:
-    listing = await _get_listing(db, listing_id)
+    listing = await _get_listing(db, listing_id, lock=True)
     await _assert_manage(db, user, listing)
+    if await db.get(CounterReturn, listing.id):
+        raise HTTPException(status_code=409, detail="Вещь уже выдана на стойке")
     if listing.status in {"closed", "blocked"} and user.role not in {"admin", "moderator"}:
         raise HTTPException(status_code=409, detail="Закрытую или заблокированную публикацию нельзя изменить")
     data = payload.model_dump(exclude_unset=True, exclude_none=True)
@@ -337,11 +338,21 @@ async def search_by_photo(payload: AIPhotoSearchRequest, db: DB, user: CurrentUs
     return output
 
 
+async def _assert_match_access(db: DB, user: CurrentUser, listing: Listing) -> None:
+    if user.role in {"admin", "moderator"}:
+        return
+    if listing.organization_id:
+        if await _can_manage_organization(db, user.id, listing.organization_id):
+            return
+    elif listing.owner_id == user.id:
+        return
+    raise HTTPException(status_code=403, detail="Нет доступа к совпадениям")
+
+
 @router.get("/{listing_id}/matches", response_model=list[MatchOut])
 async def matches(listing_id: UUID, db: DB, user: CurrentUser, limit: int = 20) -> list[MatchOut]:
     source = await _get_listing(db, listing_id)
-    if source.owner_id != user.id and user.role not in {"admin", "moderator"}:
-        raise HTTPException(status_code=403, detail="Нет доступа к совпадениям")
+    await _assert_match_access(db, user, source)
     candidates = list(
         await db.scalars(
             select(MatchCandidate)
@@ -377,8 +388,7 @@ async def update_match(
     user: CurrentUser,
 ) -> MatchOut:
     source = await _get_listing(db, listing_id)
-    if source.owner_id != user.id and user.role not in {"admin", "moderator"}:
-        raise HTTPException(status_code=403, detail="Нет доступа к совпадениям")
+    await _assert_match_access(db, user, source)
     match = await db.get(MatchCandidate, match_id)
     if not match or match.source_listing_id != listing_id:
         raise HTTPException(status_code=404, detail="Совпадение не найдено")
@@ -401,8 +411,7 @@ async def update_match(
 @router.post("/{listing_id}/rematch", status_code=202)
 async def rematch(listing_id: UUID, db: DB, user: CurrentUser) -> dict[str, str]:
     listing = await _get_listing(db, listing_id)
-    if listing.owner_id != user.id and user.role not in {"admin", "moderator"}:
-        raise HTTPException(status_code=403, detail="Нет доступа")
+    await _assert_match_access(db, user, listing)
     if listing.event_at < datetime.now(UTC) - timedelta(days=365 * 5):
         raise HTTPException(status_code=422, detail="Слишком старая публикация")
     if not await rate_limit(f"rate:rematch:{listing.id}", 3, 3600):

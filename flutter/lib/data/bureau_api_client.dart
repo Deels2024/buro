@@ -804,11 +804,11 @@ class BureauApiClient {
       _map(await request('GET', '/organizations/$id'));
   Future<JsonMap> organizationDashboard(String id) async =>
       _map(await request('GET', '/organizations/$id/dashboard'));
-  Future<List<JsonMap>> inventory(String id, {String? status}) async => _maps(
+  Future<List<JsonMap>> inventory(String id, {String? status, String? search}) async => _maps(
     await request(
       'GET',
       '/organizations/$id/inventory',
-      query: {'status': status, 'limit': 100},
+      query: {'status': status, 'q': search, 'limit': 100},
     ),
   );
   Future<List<JsonMap>> organizationClaims(String id) async => _maps(
@@ -843,8 +843,15 @@ class BureauApiClient {
       idempotencyKey: newIdempotencyKey(),
     ),
   );
-  Future<JsonMap> organizationAnalytics(String id) async =>
-      _map(await request('GET', '/organizations/$id/analytics'));
+  Future<JsonMap> organizationAnalytics(String id, {int days = 30, String? branchId}) async =>
+      _map(await request('GET', '/organizations/$id/analytics',
+        query: {'days': days, 'branch_id': branchId},
+      ));
+
+  Future<JsonMap> counterReturn(String organizationId, String listingId, String method) async =>
+      _map(await request('POST', '/organizations/$organizationId/inventory/$listingId/counter-return',
+        body: {'verification': method, 'confirmed': true},
+      ));
   Future<JsonMap> updateOrganizationSettings(
     String id,
     bool apiEnabled,

@@ -51,4 +51,5 @@ def managed_listing_out(listing: Listing) -> ManagedListingOut:
     return ManagedListingOut(
         **listing_out(listing, private=True).model_dump(),
         location=decrypt_json(listing.exact_location_cipher) if listing.exact_location_cipher else None,
+        hidden_features=decrypt_json(listing.hidden_features_cipher) if listing.hidden_features_cipher else [],
     )

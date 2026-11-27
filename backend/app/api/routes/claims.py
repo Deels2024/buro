@@ -11,6 +11,7 @@ from app.db.models import (
     ClaimEvidence,
     ContactGrant,
     Conversation,
+    CounterReturn,
     Handover,
     Listing,
     MatchCandidate,
@@ -265,7 +266,7 @@ async def submit_claim(claim_id: UUID, db: DB, user: CurrentUser) -> Claim:
 async def decide_claim(payload: ClaimDecision, claim_id: UUID, db: DB, user: CurrentUser) -> Claim:
     claim, listing = await _claim_and_listing(db, claim_id)
     await _assert_holder(db, user, listing)
-    if claim.status not in {"under_review", "needs_more_info"}:
+    if listing.status != "active" or claim.status not in {"under_review", "needs_more_info"}:
         raise HTTPException(status_code=409, detail="Заявление уже обработано")
     claim.status = payload.decision
     claim.decision_reason = payload.reason
@@ -394,8 +395,8 @@ async def create_handover(payload: HandoverCreate, claim_id: UUID, db: DB, user:
     await _assert_participant(db, user, claim, listing)
     if claim.claimant_id != user.id:
         raise HTTPException(status_code=403, detail="Способ передачи выбирает подтверждённый владелец")
-    if claim.status != "approved":
-        raise HTTPException(status_code=409, detail="Владелец ещё не подтверждён")
+    if claim.status != "approved" or listing.status != "active" or await db.get(CounterReturn, listing.id):
+        raise HTTPException(status_code=409, detail="Передача недоступна")
     existing = await db.scalar(select(Handover).where(Handover.claim_id == claim.id))
     if existing:
         return _handover_out(existing)
@@ -446,7 +447,7 @@ async def regenerate_handover(claim_id: UUID, db: DB, user: CurrentUser) -> Hand
     if claim.claimant_id != user.id:
         raise HTTPException(status_code=403, detail="QR обновляет подтверждённый владелец")
     handover = await db.scalar(select(Handover).where(Handover.claim_id == claim.id).with_for_update())
-    if claim.status != "approved" or not handover or handover.completed_at:
+    if claim.status != "approved" or listing.status != "active" or not handover or handover.completed_at or await db.get(CounterReturn, listing.id):
         raise HTTPException(status_code=409, detail="Передача недоступна")
     raw_token = random_token(24)
     handover.qr_token_hash = hash_secret(raw_token)
@@ -471,7 +472,7 @@ async def scan_handover(payload: HandoverScan, db: DB, user: CurrentUser) -> Han
         return _handover_out(handover)
     if handover.qr_token_hash != hash_secret(payload.token) or handover.qr_expires_at.replace(tzinfo=UTC) <= datetime.now(UTC):
         raise HTTPException(status_code=400, detail="QR-код недействителен или истёк")
-    if claim.status != "approved" or listing.status != "active":
+    if claim.status != "approved" or listing.status != "active" or await db.get(CounterReturn, listing.id):
         raise HTTPException(status_code=409, detail="Передача больше недоступна")
     now = datetime.now(UTC)
     if user.id == claim.claimant_id:
