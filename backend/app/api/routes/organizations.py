@@ -402,7 +402,7 @@ async def analytics(
             raise HTTPException(status_code=404, detail="Филиал не найден")
         scope.append(Listing.branch_id == branch_id)
     returns = confirmed_returns()
-    cohort = [Listing.created_at >= start, Listing.created_at < end]
+    cohort = [Listing.created_at >= start, Listing.created_at < end, Listing.published_at < end]
 
     async def count(*filters, with_returns=False):
         query = select(func.count(Listing.id)).select_from(Listing)
@@ -432,7 +432,7 @@ async def analytics(
         ),
         "closed_without_return": await count(
             Listing.status == "closed", Listing.closed_at >= start, Listing.closed_at < end,
-            returns.c.listing_id.is_(None), with_returns=True
+            Listing.published_at.is_not(None), returns.c.listing_id.is_(None), with_returns=True
         ),
         "returned_in_cohort": returned_in_cohort,
         "return_rate": round(returned_in_cohort / registered * 100, 2) if registered else None,

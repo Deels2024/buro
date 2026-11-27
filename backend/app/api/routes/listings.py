@@ -188,9 +188,12 @@ async def get_listing(listing_id: UUID, db: DB) -> ListingOut:
 
 
 async def _assert_manage(db: DB, user: CurrentUser, listing: Listing) -> None:
-    allowed = listing.owner_id == user.id or user.role in {"admin", "moderator"}
-    if not allowed and listing.organization_id:
-        allowed = await _can_manage_organization(db, user.id, listing.organization_id)
+    allowed = user.role in {"admin", "moderator"}
+    if not allowed:
+        allowed = (
+            await _can_manage_organization(db, user.id, listing.organization_id)
+            if listing.organization_id else listing.owner_id == user.id
+        )
     if not allowed:
         raise HTTPException(status_code=403, detail="Нет доступа к публикации")
 

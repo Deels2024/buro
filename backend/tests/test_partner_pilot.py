@@ -83,13 +83,19 @@ async def test_partner_intake_match_and_exact_return_report(workflow, monkeypatc
     private = await client.get(f"/v1/listings/{item}/manage", headers=h("claimant"))
     assert private.json()["hidden_features"] == ["secret-zip"]
     assert "hidden_features" not in (await client.get(f"/v1/listings/{item}")).json()
+    for role in ("viewer", "stranger"):
+        assert (await client.get(f"/v1/listings/{item}/manage", headers=h(role))).status_code == 403
 
     first = await client.get(f"{prefix}/analytics", params={"days": 30}, headers=h("holder"))
     assert first.json()["on_hand"] == 1
     assert first.json()["return_rate"] is None
 
-    manual = await client.post("/v1/listings", json=listing_body(
+    draft = await client.post("/v1/listings", json=listing_body(
         organization_id=str(venue.id), branch_id=str(branch.id),
+    ), headers=h("holder"))
+    assert draft.status_code == 201
+    manual = await client.post("/v1/listings", json=listing_body(
+        **body, media_ids=[await photo(sessions, users["holder"])],
     ), headers=h("holder"))
     assert (await client.patch(f"/v1/listings/{manual.json()['id']}", json={"status": "closed"},
                                headers=h("holder"))).status_code == 200
@@ -105,6 +111,10 @@ async def test_partner_intake_match_and_exact_return_report(workflow, monkeypatc
     assert (await client.patch(f"/v1/listings/{item}", headers=h("admin"),
                                json={"status": "active"})).status_code == 409
     assert (await client.get(f"/items/{item}/")).status_code == 404
+    closed_entries = await client.get(f"{prefix}/inventory", params={"status": "closed"}, headers=h("holder"))
+    journal_rows = {entry["id"]: entry for entry in closed_entries.json()}
+    assert journal_rows[item]["returned_at"] is not None
+    assert journal_rows[manual.json()["id"]]["returned_at"] is None
 
     report = await client.get(f"{prefix}/analytics", params={"days": 30, "branch_id": str(branch.id)},
                               headers=h("holder"))
