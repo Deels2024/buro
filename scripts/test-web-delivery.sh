@@ -70,6 +70,35 @@ for headers in [
         assert 'id="retry"' in response.read().decode()
 print('Map iframe upgrade delivery passed.')
 PY
+# Verify the actual gateway behavior used by visitors and search crawlers.
+docker compose exec -T api python - <<'PYTEST'
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+def public(path):
+    return urlopen(Request("http://gateway" + path, headers={"Host": "edinburo.ru"}), timeout=10)
+
+for path in ("/invalid-seo-route-9472", "/llms.txt"):
+    try:
+        with public(path) as response:
+            raise AssertionError(f"{path} returned {response.status}, not 404")
+    except HTTPError as error:
+        assert error.code == 404, (path, error.code)
+
+for path in ("/app/", "/app/?action=organization"):
+    with public(path) as response:
+        assert response.status == 200
+        assert "noindex" in response.headers.get("X-Robots-Tag", "")
+        assert b"flutter_bootstrap.js" in response.read()
+
+for path in ("/site.webmanifest", "/pwa-launch.js", "/icons/icon-180.png"):
+    with public(path) as response:
+        assert response.status == 200
+
+with public("/byuro-nahodok-sankt-peterburg/") as response:
+    assert 'id="petersburg-guide"' in response.read().decode()
+print("Public SEO routing passed: proper 404, existing app routes and Petersburg guide.")
+PYTEST
 # A legacy forced command leaves BN_RELEASE_SHA unset and uses :local tags.
 # The API/worker must still identify the baked commit and become healthy.
 docker compose stop worker
