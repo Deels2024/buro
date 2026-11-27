@@ -1,6 +1,7 @@
 import 'package:file_selector/file_selector.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/api_widgets.dart';
 import '../../core/theme.dart';
@@ -312,6 +313,41 @@ class _OrgDashboardPageState extends State<OrgDashboardPage> {
     ).api.organizationDashboard(widget.organization['id'].toString());
   }
 
+  Future<void> _intake() async {
+    final organizationId = widget.organization['id'].toString();
+    final api = AppScope.of(context, listen: false).api;
+    try {
+      final branches = (await api.branches(organizationId))
+          .where((branch) => branch['active'] == true).toList();
+      if (!mounted) return;
+      if (branches.isEmpty) {
+        showApiError(context, BureauApiException(422, 'Сначала добавьте активный филиал в разделе «Филиалы».'));
+        return;
+      }
+      final branchId = branches.length == 1
+          ? branches.single['id'].toString()
+          : await showBureauDialog<String>(
+              context: context,
+              builder: (context) => SimpleDialog(
+                title: const Text('Где хранится находка?'),
+                children: [
+                  for (final branch in branches)
+                    SimpleDialogOption(
+                      onPressed: () => Navigator.pop(context, branch['id'].toString()),
+                      child: Text(branch['name'].toString()),
+                    ),
+                ],
+              ),
+            );
+      if (!mounted || branchId == null) return;
+      pushPage(context, CreateFlowPage(
+        initialFound: true, organizationId: organizationId, branchId: branchId,
+      ));
+    } catch (error) {
+      if (mounted) showApiError(context, error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => SafeArea(
     child: ListView(
@@ -382,13 +418,7 @@ class _OrgDashboardPageState extends State<OrgDashboardPage> {
           subtitle: 'Фото → описание → ячейка',
           color: BureauColors.green,
           background: BureauColors.greenSoft,
-          onTap: () => pushPage(
-            context,
-            CreateFlowPage(
-              initialFound: true,
-              organizationId: widget.organization['id'].toString(),
-            ),
-          ),
+          onTap: _intake,
         ),
         const SizedBox(height: 10),
         SettingRow(
@@ -417,6 +447,12 @@ class _OrgDashboardPageState extends State<OrgDashboardPage> {
   );
 }
 
+String _inventoryStatus(JsonMap entry) {
+  if (entry['returned_at'] != null) return 'Выдано владельцу';
+  if (entry['status'] == 'closed') return 'Закрыто без выдачи';
+  return stateLabel(entry['status']);
+}
+
 class OrgInventoryPage extends StatefulWidget {
   const OrgInventoryPage({super.key, required this.organization});
   final JsonMap organization;
@@ -426,6 +462,7 @@ class OrgInventoryPage extends StatefulWidget {
 
 class _OrgInventoryPageState extends State<OrgInventoryPage> {
   String? _status;
+  String _search = '';
   late Future<List<JsonMap>> _future;
   @override
   void didChangeDependencies() {
@@ -436,7 +473,7 @@ class _OrgInventoryPageState extends State<OrgInventoryPage> {
   void _reload() => _future = AppScope.of(
     context,
     listen: false,
-  ).api.inventory(widget.organization['id'].toString(), status: _status);
+  ).api.inventory(widget.organization['id'].toString(), status: _status, search: _search);
   @override
   Widget build(BuildContext context) => SafeArea(
     child: Column(
@@ -445,14 +482,32 @@ class _OrgInventoryPageState extends State<OrgInventoryPage> {
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
           child: Column(
             children: [
-              _OrgHeader('Инвентарь', widget.organization),
+              _OrgHeader('Журнал находок', widget.organization),
               const SizedBox(height: 14),
+              TextFormField(
+                initialValue: _search,
+                maxLength: 180,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  labelText: 'Название, описание или код хранения',
+                  suffixIcon: Icon(Icons.search),
+                  counterText: '',
+                ),
+                onChanged: (value) => _search = value.trim(),
+                onFieldSubmitted: (_) => setState(_reload),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(onPressed: () => setState(_reload), child: const Text('Найти')),
+              ),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
                   for (final option in const {
-                    'active': 'Активные', 'draft': 'Черновики', 'closed': 'Закрытые',
+                    'active': 'Активные', 'paused': 'На хранении без публикации',
+                    'draft': 'Черновики', 'closed': 'Закрытые',
                   }.entries)
                     ChoiceChip(
                       label: Text(option.value),
@@ -481,16 +536,21 @@ class _OrgInventoryPageState extends State<OrgInventoryPage> {
                         icon: Icons.inventory_2_outlined,
                         title: item['title']?.toString() ?? '',
                         subtitle:
-                            '${item['storage_code'] ?? 'Без ячейки'} · ${stateLabel(item['status'])}',
+                            [
+                              if (item['branch_name'] != null) item['branch_name'].toString(),
+                              item['storage_code']?.toString() ?? 'Без ячейки',
+                              _inventoryStatus(item),
+                            ].join(' · '),
                         color: BureauColors.green,
                         background: BureauColors.greenSoft,
-                        onTap: () => pushPage(
-                          context,
-                          OrganizationRecordPage(
-                            organization: widget.organization,
-                            listing: item,
-                          ),
-                        ),
+                        onTap: () async {
+                          await Navigator.of(context).push(MaterialPageRoute<void>(
+                            builder: (_) => OrganizationRecordPage(
+                              organization: widget.organization, listing: item,
+                            ),
+                          ));
+                          if (mounted) setState(_reload);
+                        },
                       ),
                       const SizedBox(height: 10),
                     ],
@@ -518,8 +578,133 @@ class OrganizationRecordPage extends StatefulWidget {
 }
 
 class _OrganizationRecordPageState extends State<OrganizationRecordPage> {
+  late Future<List<JsonMap>> _matches;
+  bool _issued = false;
+
+  String get _listingId => widget.listing['id'].toString();
+  BureauApiClient get _api => AppScope.of(context, listen: false).api;
+  bool get _onHand => !_issued && const {'active', 'paused'}.contains(widget.listing['status']);
+  bool get _canHandle => const {'owner', 'manager', 'operator'}.contains(widget.organization['member_role']);
+  bool get _canIssue =>
+      _onHand && widget.organization['status'] == 'verified' &&
+      const {'owner', 'manager'}.contains(widget.organization['member_role']) &&
+      const {'approved', 'auto_approved'}.contains(widget.listing['moderation_status']) &&
+      !const {'documents', 'keys', 'jewelry', 'pets'}.contains(widget.listing['category']);
+
   @override
-  Widget build(BuildContext context) => EditListingPage(listingId: widget.listing['id'].toString());
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _matches = _onHand && _canHandle ? _api.matches(_listingId) : Future.value(<JsonMap>[]);
+  }
+
+  Future<void> _issueAtDesk() async {
+    final details = await _api.managedListing(_listingId);
+    if (!mounted) return;
+    final features = (details['hidden_features'] as List? ?? const []).join(' · ');
+    String? method;
+    var confirmed = false;
+    final selected = await showBureauDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Очная выдача без телефона'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Не подсказывайте приметы. Проверьте право на вещь по правилам площадки. Документы, деньги, опасные и особые ценные предметы оформляйте отдельно. Не вводите персональные данные.'),
+              if (features.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text('Только для сотрудника: $features'),
+              ],
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: method,
+                decoration: const InputDecoration(labelText: 'Что подтвердило право на вещь?'),
+                items: [
+                  if (features.isNotEmpty)
+                    const DropdownMenuItem(value: 'private_feature', child: Text('Непубличная примета')),
+                  const DropdownMenuItem(value: 'ownership_evidence', child: Text('Доказательство владения')),
+                ],
+                onChanged: (value) => update(() => method = value),
+              ),
+              CheckboxListTile(
+                value: confirmed,
+                title: const Text('Право проверено. Вещь уже передана владельцу.'),
+                contentPadding: EdgeInsets.zero,
+                onChanged: (value) => update(() => confirmed = value == true),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+            FilledButton(
+              onPressed: method != null && confirmed ? () => Navigator.pop(context, method) : null,
+              child: const Text('Зафиксировать выдачу'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    await _api.counterReturn(widget.organization['id'].toString(), _listingId, selected);
+    if (!mounted) return;
+    setState(() => _issued = true);
+    showApiSuccess(context, 'Выдача зафиксирована');
+  }
+
+  @override
+  Widget build(BuildContext context) => BureauPage(
+    title: widget.listing['title'].toString(),
+    subtitle: 'Запись $_listingId',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        NoticeCard(_issued
+            ? 'Выдано владельцу на стойке.'
+            : 'Хранение: ${widget.listing['storage_code'] ?? 'не указано'} · ${_inventoryStatus(widget.listing)}'),
+        if (_canHandle && !_issued) ...[
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => EditListingPage(listingId: _listingId),
+              ));
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            child: const Text('Открыть карточку учёта'),
+          ),
+        ],
+        if (_canIssue) ...[
+          const SizedBox(height: 12),
+          ApiButton(label: 'Оформить выдачу без телефона', onPressed: _issueAtDesk),
+        ],
+        if (_onHand && _canHandle) ...[
+          const SectionTitle('Возможные совпадения'),
+          const Text('Подсказки для проверки, не подтверждение владельца.'),
+          ApiFutureBuilder<List<JsonMap>>(
+            future: _matches,
+            empty: const NoticeCard('Совпадений пока нет.'),
+            builder: (context, items) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final match in items)
+                  if (match['candidate'] case final Map candidate)
+                    ListTile(
+                      title: Text(candidate['title']?.toString() ?? ''),
+                      subtitle: Text([
+                        candidate['public_region'], candidate['description'],
+                      ].whereType<String>().join(' · ')),
+                    ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
 }
 
 class OrgClaimsPage extends StatefulWidget {
@@ -736,61 +921,108 @@ class OrgAnalyticsPage extends StatefulWidget {
 
 class _OrgAnalyticsPageState extends State<OrgAnalyticsPage> {
   late Future<JsonMap> _future;
+  late Future<List<JsonMap>> _branches;
+  int _days = 30;
+  String? _branchId;
+  String _branchName = 'Все филиалы';
+  BureauApiClient get _api => AppScope.of(context, listen: false).api;
+  String get _id => widget.organization['id'].toString();
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future = AppScope.of(
-      context,
-      listen: false,
-    ).api.organizationAnalytics(widget.organization['id'].toString());
+    _branches = _api.branches(_id);
+    _reload();
   }
+
+  void _reload() => _future = _api.organizationAnalytics(_id, days: _days, branchId: _branchId);
 
   @override
   Widget build(BuildContext context) => SafeArea(
     child: ListView(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
       children: [
-        _OrgHeader('Аналитика возвратов', widget.organization),
+        _OrgHeader('Отчёт по находкам', widget.organization),
         const SizedBox(height: 18),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final days in [30, 90])
+              ChoiceChip(
+                label: Text('$days дней'),
+                selected: _days == days,
+                onSelected: (_) => setState(() { _days = days; _reload(); }),
+              ),
+          ],
+        ),
+        ApiFutureBuilder<List<JsonMap>>(
+          future: _branches,
+          builder: (context, branches) => DropdownButtonFormField<String>(
+            isExpanded: true,
+            initialValue: _branchId ?? '',
+            decoration: const InputDecoration(labelText: 'Филиал'),
+            items: [
+              const DropdownMenuItem(value: '', child: Text('Все филиалы')),
+              for (final branch in branches)
+                DropdownMenuItem(value: branch['id'].toString(), child: Text(branch['name'].toString())),
+            ],
+            onChanged: (value) => setState(() {
+              _branchId = value == null || value.isEmpty ? null : value;
+              _branchName = _branchId == null
+                  ? 'Все филиалы'
+                  : branches.firstWhere((b) => b['id'].toString() == _branchId)['name'].toString();
+              _reload();
+            }),
+          ),
+        ),
+        const SizedBox(height: 12),
         ApiFutureBuilder<JsonMap>(
           future: _future,
           builder: (context, data) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: MetricCard(
-                      value: '${data['registered']}',
-                      label: 'зарегистрировано',
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: MetricCard(
-                      value: '${data['returned']}',
-                      label: 'возвращено',
-                      color: BureauColors.green,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
+              MetricCard(value: '${data['registered']}', label: 'Принято за период'),
+              const SizedBox(height: 8),
+              MetricCard(value: '${data['on_hand']}', label: 'На хранении сейчас'),
+              const SizedBox(height: 8),
+              MetricCard(value: '${data['returned']}', label: 'Выдано владельцам за период', color: BureauColors.green),
+              const SizedBox(height: 8),
+              MetricCard(value: '${data['closed_without_return']}', label: 'Закрыто без выдачи за период'),
+              const SizedBox(height: 8),
               MetricCard(
-                value: '${data['return_rate']}%',
-                label: 'доля возврата за ${data['period_days']} дней',
+                value: data['return_rate'] == null ? '—' : '${data['return_rate']}%',
+                label: 'Доля выданных среди принятых в этом периоде',
                 color: BureauColors.green,
               ),
-              const SectionTitle('Категории'),
-              for (final category in List<JsonMap>.from(
-                data['categories'] as List,
-              )) ...[
+              const SizedBox(height: 8),
+              ApiButton(
+                label: 'Скопировать отчёт для Excel',
+                outlined: true,
+                icon: Icons.copy_all_outlined,
+                onPressed: () async {
+                  final report = [
+                    ['Период (UTC)', data['period_from'], data['period_to']],
+                    ['Филиал', _branchName],
+                    ['Принято', data['registered']],
+                    ['На хранении сейчас', data['on_hand']],
+                    ['Выдано владельцам', data['returned']],
+                    ['Закрыто без выдачи', data['closed_without_return']],
+                    ['Выдано из принятых в этом периоде', data['returned_in_cohort']],
+                  ].map((row) => row.map((cell) {
+                    final value = cell.toString().replaceAll(RegExp(r'[\t\r\n]'), ' ');
+                    return RegExp(r'^\s*[=+@-]').hasMatch(value) ? "'$value" : value;
+                  }).join('\t')).join('\n');
+                  await Clipboard.setData(ClipboardData(text: report));
+                  if (context.mounted) showApiSuccess(context, 'Отчёт скопирован');
+                },
+              ),
+              const SectionTitle('Категории принятых вещей'),
+              for (final category in List<JsonMap>.from(data['categories'] as List))
                 SettingRow(
                   icon: Icons.category_outlined,
-                  title: category['category']?.toString() ?? '',
+                  title: categoryLabels[category['category']] ?? category['category'].toString(),
                   subtitle: '${category['count']} вещей',
                 ),
-                const SizedBox(height: 10),
-              ],
             ],
           ),
         ),

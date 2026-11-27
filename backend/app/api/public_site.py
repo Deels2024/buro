@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB
 from app.core.config import get_settings
-from app.db.models import Listing, MediaObject
+from app.db.models import Branch, Listing, MediaObject, Organization
 from app.services.categories import CATEGORIES, category_values, normalize_category
 from app.services.listing_search import text_search
 from app.services.storage import storage
@@ -140,6 +140,19 @@ async def item_page(listing_id: UUID, db: DB) -> HTMLResponse:
     found = item.kind == "found"
     action = f'/app/?{urlencode({"action":"claim" if found else "listing", "listing":str(item.id)})}'
     body = f'<nav class="breadcrumbs"><a href="/">Главная</a><a href="/{"naydennye" if found else "poteryannye"}-veshchi/"> / {"Находки" if found else "Пропажи"}</a></nav><h1>{escape(item.title)}</h1><div class="detail"><div class="gallery">{gallery}</div><section><span class="tag">{"Найдено" if found else "Потеряно"} · {CATEGORIES[normalize_category(item.category)]}</span><p>{escape(item.public_region)} · {item.event_at:%d.%m.%Y}</p><p class="description">{escape(item.description)}</p><div class="actions"><a class="button" href="{escape(action)}">{"Это может быть моё" if found else "Открыть объявление в кабинете"}</a></div><p class="meta">{"Потребуется вход по SMS и подтверждение признаков вещи." if found else "Нашли похожую вещь? Добавьте находку — мы сравним объявления."}</p><a href="/app/?action=found">Сообщить о находке</a></section></div>'
+    if found and item.organization_id and item.branch_id:
+        office = (await db.execute(
+            select(Organization.name, Branch.public_address)
+            .join(Branch, Organization.id == Branch.organization_id)
+            .where(Organization.id == item.organization_id, Organization.status == "verified",
+                   Branch.id == item.branch_id, Branch.active.is_(True))
+        )).one_or_none()
+        if office:
+            name, address = office
+            body += (f'<aside class="note"><strong>Нет доступа к телефону?</strong> '
+                     f'Уточните возможность очной выдачи на стойке {escape(name)}: {escape(address)}. '
+                     'Назовите номер карточки и будьте готовы подтвердить, что вещь ваша. '
+                     f'<small>Номер карточки: {item.id}</small></aside>')
     if item.approx_latitude is not None and item.approx_longitude is not None:
         lat, lon = item.approx_latitude, item.approx_longitude
         url = 'https://www.openstreetmap.org/export/embed.html?' + urlencode({"bbox":f"{lon-.02},{lat-.015},{lon+.02},{lat+.015}", "layer":"mapnik", "marker":f"{lat},{lon}"})

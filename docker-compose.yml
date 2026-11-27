@@ -198,8 +198,8 @@ services:
     restart: unless-stopped
 
   minio:
-    # Official MinIO registry; pin the tested release to avoid mutable tags.
-    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # IBM documents this mirror for the removed Quay image. Same verified OCI digest.
+    image: icr.io/fusion-open/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: bureau
@@ -213,18 +213,17 @@ services:
     restart: unless-stopped
 
   minio-init:
-    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    # Reuse the already-built backend image; no separate MinIO client pull.
+    image: bureau/api:${BN_RELEASE_SHA:-local}
     depends_on:
       - minio
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        until mc alias set local http://minio:9000 bureau "$${MINIO_PASSWORD}"; do sleep 1; done
-        mc mb --ignore-existing local/bureau-media
-        mc anonymous set none local/bureau-media
+    entrypoint: ["python", "-m", "app.services.storage_bootstrap"]
     environment:
-      MINIO_PASSWORD: "${MINIO_PASSWORD}"
+      BN_S3_ENDPOINT: http://minio:9000
+      BN_S3_REGION: ru-central1
+      BN_S3_BUCKET: bureau-media
+      BN_S3_ACCESS_KEY: bureau
+      BN_S3_SECRET_KEY: "${MINIO_PASSWORD}"
     restart: "no"
 
   openclip-cache-init:

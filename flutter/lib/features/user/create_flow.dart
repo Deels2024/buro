@@ -207,6 +207,11 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
       );
       return false;
     }
+    if (_step == 2 && widget.organizationId != null && _found &&
+        _storage.text.trim().isEmpty) {
+      showApiError(context, BureauApiException(422, 'Укажите, где хранится вещь: полку или номер ячейки.'));
+      return false;
+    }
     return true;
   }
 
@@ -486,7 +491,7 @@ class _CreateFlowPageState extends State<CreateFlowPage> {
           controller: _storage,
           decoration: const InputDecoration(
             prefixIcon: Icon(Icons.inventory_2_outlined),
-            labelText: 'Код ячейки хранения',
+            labelText: 'Полка или код ячейки хранения',
           ),
         ),
       ],

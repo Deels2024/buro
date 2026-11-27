@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, HTTPException, Query, Response
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DB, CurrentUser, OrganizationKey
@@ -11,6 +11,7 @@ from app.db.models import (
     Branch,
     BulkImportJob,
     Claim,
+    CounterReturn,
     IntegrationWebhook,
     Listing,
     Organization,
@@ -23,21 +24,25 @@ from app.schemas import (
     BranchCreate,
     BulkImportRequest,
     ClaimOut,
+    CounterReturnCreate,
+    CounterReturnOut,
     CSVImportRequest,
     InviteMember,
-    ListingOut,
     OrganizationApiKeyCreate,
     OrganizationApiKeyOut,
     OrganizationCreate,
     OrganizationDashboard,
+    OrganizationInventoryItem,
     OrganizationOut,
     OrganizationSettingsUpdate,
     WebhookCreate,
     WebhookOut,
 )
+from app.services.audit import add_audit
 from app.services.cache import enqueue
 from app.services.categories import normalize_category
 from app.services.csv_import import parse_inventory_csv
+from app.services.returns import confirmed_returns
 from app.services.serializers import listing_out
 from app.services.webhooks import validate_webhook_url
 
@@ -84,23 +89,26 @@ async def create_organization(payload: OrganizationCreate, db: DB, user: Current
 
 
 @router.get("/mine", response_model=list[OrganizationOut])
-async def my_organizations(db: DB, user: CurrentUser) -> list[Organization]:
-    result = await db.scalars(
-        select(Organization)
+async def my_organizations(db: DB, user: CurrentUser) -> list[OrganizationOut]:
+    rows = await db.execute(
+        select(Organization, OrganizationMember.role)
         .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)
         .where(OrganizationMember.user_id == user.id, OrganizationMember.status == "active")
         .order_by(Organization.name)
     )
-    return list(result)
+    return [
+        OrganizationOut.model_validate(org).model_copy(update={"member_role": role})
+        for org, role in rows
+    ]
 
 
 @router.get("/{organization_id}", response_model=OrganizationOut)
-async def get_organization(organization_id: UUID, db: DB, user: CurrentUser) -> Organization:
-    await _membership(db, organization_id, user.id)
+async def get_organization(organization_id: UUID, db: DB, user: CurrentUser) -> OrganizationOut:
+    member = await _membership(db, organization_id, user.id)
     organization = await db.get(Organization, organization_id)
     if not organization:
         raise HTTPException(status_code=404, detail="Организация не найдена")
-    return organization
+    return OrganizationOut.model_validate(organization).model_copy(update={"member_role": member.role})
 
 
 @router.get("/{organization_id}/dashboard", response_model=OrganizationDashboard)
@@ -109,7 +117,7 @@ async def dashboard(organization_id: UUID, db: DB, user: CurrentUser) -> Organiz
     active_inventory = await db.scalar(
         select(func.count(Listing.id)).where(
             Listing.organization_id == organization_id,
-            Listing.status == "active",
+            Listing.status.in_(["active", "paused"]),
             Listing.kind == "found",
         )
     )
@@ -121,11 +129,14 @@ async def dashboard(organization_id: UUID, db: DB, user: CurrentUser) -> Organiz
             Claim.status.in_(["under_review", "needs_more_info"]),
         )
     )
+    returns = confirmed_returns()
     returned = await db.scalar(
-        select(func.count(Listing.id)).where(
+        select(func.count(returns.c.listing_id))
+        .join(Listing, Listing.id == returns.c.listing_id)
+        .where(
             Listing.organization_id == organization_id,
-            Listing.status == "closed",
-            Listing.closed_at >= datetime.now(UTC) - timedelta(days=30),
+            Listing.kind == "found",
+            returns.c.completed_at >= datetime.now(UTC) - timedelta(days=30),
         )
     )
     return OrganizationDashboard(
@@ -136,26 +147,43 @@ async def dashboard(organization_id: UUID, db: DB, user: CurrentUser) -> Organiz
     )
 
 
-@router.get("/{organization_id}/inventory", response_model=list[ListingOut])
+@router.get("/{organization_id}/inventory", response_model=list[OrganizationInventoryItem])
 async def inventory(
     organization_id: UUID,
     db: DB,
     user: CurrentUser,
+    response: Response,
     status: str | None = Query(default=None, max_length=24),
     limit: int = Query(default=50, ge=1, le=100),
-) -> list[ListingOut]:
-    await _membership(db, organization_id, user.id)
-    filters = [Listing.organization_id == organization_id]
+    q: str | None = Query(default=None, max_length=180),
+) -> list[OrganizationInventoryItem]:
+    response.headers["Cache-Control"] = "no-store"
+    member = await _membership(db, organization_id, user.id)
+    can_handle = member.role in {"owner", "manager", "operator"}
+    filters = [Listing.organization_id == organization_id, Listing.kind == "found"]
+    if q and (term := q.strip()):
+        search = [Listing.title.icontains(term, autoescape=True), Listing.description.icontains(term, autoescape=True)]
+        if can_handle:
+            search.append(Listing.storage_code.icontains(term, autoescape=True))
+        filters.append(or_(*search))
     if status:
         filters.append(Listing.status == status)
-    result = await db.scalars(
-        select(Listing)
+    returns = confirmed_returns()
+    result = await db.execute(
+        select(Listing, Branch.name, returns.c.completed_at)
+        .outerjoin(Branch, (Branch.id == Listing.branch_id) & (Branch.organization_id == organization_id))
+        .outerjoin(returns, returns.c.listing_id == Listing.id)
         .where(*filters)
         .options(selectinload(Listing.media))
-        .order_by(Listing.created_at.desc())
+        .order_by(Listing.created_at.desc(), Listing.id)
         .limit(limit)
     )
-    return [listing_out(item) for item in result]
+    return [
+        OrganizationInventoryItem(
+            **listing_out(item, private=can_handle).model_dump(), branch_name=branch_name, returned_at=returned_at,
+        )
+        for item, branch_name, returned_at in result
+    ]
 
 
 @router.get("/{organization_id}/claims", response_model=list[ClaimOut])
@@ -357,34 +385,98 @@ async def external_inventory_import(
 
 
 @router.get("/{organization_id}/analytics")
-async def analytics(organization_id: UUID, db: DB, user: CurrentUser) -> dict:
+async def analytics(
+    organization_id: UUID,
+    db: DB,
+    user: CurrentUser,
+    days: int = Query(default=90, ge=1, le=366),
+    branch_id: UUID | None = None,
+) -> dict:
     await _membership(db, organization_id, user.id)
+    end = datetime.now(UTC)
+    start = end - timedelta(days=days)
+    scope = [Listing.organization_id == organization_id, Listing.kind == "found"]
+    if branch_id is not None:
+        branch = await db.get(Branch, branch_id)
+        if not branch or branch.organization_id != organization_id:
+            raise HTTPException(status_code=404, detail="Филиал не найден")
+        scope.append(Listing.branch_id == branch_id)
+    returns = confirmed_returns()
+    cohort = [Listing.created_at >= start, Listing.created_at < end, Listing.published_at < end]
+
+    async def count(*filters, with_returns=False):
+        query = select(func.count(Listing.id)).select_from(Listing)
+        if with_returns:
+            query = query.outerjoin(returns, returns.c.listing_id == Listing.id)
+        return int(await db.scalar(query.where(*scope, *filters)) or 0)
+
     category_rows = await db.execute(
         select(Listing.category, func.count(Listing.id))
-        .where(Listing.organization_id == organization_id)
+        .where(*scope, *cohort)
         .group_by(Listing.category)
-        .order_by(func.count(Listing.id).desc())
+        .order_by(func.count(Listing.id).desc(), Listing.category)
         .limit(20)
     )
-    returned_90d = await db.scalar(
-        select(func.count(Listing.id)).where(
-            Listing.organization_id == organization_id,
-            Listing.closed_at >= datetime.now(UTC) - timedelta(days=90),
-        )
-    )
-    total_90d = await db.scalar(
-        select(func.count(Listing.id)).where(
-            Listing.organization_id == organization_id,
-            Listing.created_at >= datetime.now(UTC) - timedelta(days=90),
-        )
-    )
+    registered = await count(*cohort)
+    returned_in_cohort = await count(*cohort, returns.c.completed_at < end, with_returns=True)
     return {
-        "period_days": 90,
-        "registered": total_90d or 0,
-        "returned": returned_90d or 0,
-        "return_rate": round((returned_90d or 0) / (total_90d or 1) * 100, 2),
-        "categories": [{"category": category, "count": count} for category, count in category_rows.all()],
+        "period_days": days,
+        "period_from": start,
+        "period_to": end,
+        "registered": registered,
+        "on_hand": await count(
+            Listing.status.in_(["active", "paused"]), returns.c.listing_id.is_(None), with_returns=True
+        ),
+        "returned": await count(
+            returns.c.completed_at >= start, returns.c.completed_at < end, with_returns=True
+        ),
+        "closed_without_return": await count(
+            Listing.status == "closed", Listing.closed_at >= start, Listing.closed_at < end,
+            Listing.published_at.is_not(None), returns.c.listing_id.is_(None), with_returns=True
+        ),
+        "returned_in_cohort": returned_in_cohort,
+        "return_rate": round(returned_in_cohort / registered * 100, 2) if registered else None,
+        "categories": [{"category": category, "count": number} for category, number in category_rows.all()],
     }
+
+
+@router.post("/{organization_id}/inventory/{listing_id}/counter-return", response_model=CounterReturnOut)
+async def record_counter_return(
+    organization_id: UUID, listing_id: UUID, payload: CounterReturnCreate, db: DB, user: CurrentUser,
+) -> CounterReturn:
+    # No claimant account or fake QR: this is a distinct, audited physical handover.
+    await _manager(db, organization_id, user.id)
+    organization = await db.get(Organization, organization_id)
+    if not organization or organization.status != "verified":
+        raise HTTPException(status_code=403, detail="Организация ещё не проверена")
+    listing = await db.scalar(select(Listing).where(
+        Listing.id == listing_id, Listing.organization_id == organization_id,
+    ).with_for_update())
+    if not listing or listing.kind != "found":
+        raise HTTPException(status_code=404, detail="Находка не найдена")
+    existing = await db.get(CounterReturn, listing.id)
+    if existing:
+        return existing
+    returns = confirmed_returns()
+    returned = await db.scalar(select(returns.c.listing_id).where(returns.c.listing_id == listing.id))
+    if listing.status not in {"active", "paused"} or listing.moderation_status not in {"approved", "auto_approved"} or returned:
+        raise HTTPException(status_code=409, detail="Находка недоступна для очной выдачи")
+    if normalize_category(listing.category) in {"documents", "keys", "jewelry", "pets"}:
+        raise HTTPException(status_code=422, detail="Для этой категории используйте отдельный порядок площадки")
+    if payload.verification == "private_feature" and not listing.hidden_features_cipher:
+        raise HTTPException(status_code=422, detail="У находки не сохранено скрытой приметы")
+    now = datetime.now(UTC)
+    record = CounterReturn(
+        listing_id=listing.id, actor_id=user.id, verification=payload.verification, completed_at=now,
+    )
+    db.add(record)
+    listing.status = "closed"
+    listing.closed_at = now
+    add_audit(db, actor_id=user.id, action="listing.counter_returned", entity_type="listing",
+              entity_id=listing.id, payload={"verification": payload.verification})
+    await db.commit()
+    await db.refresh(record)
+    return record
 
 
 @router.patch("/{organization_id}/settings", response_model=OrganizationOut)

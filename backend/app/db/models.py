@@ -236,6 +236,16 @@ class Handover(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CounterReturn(Base):
+    """Staff-attested handover to an owner who cannot use the app."""
+    __tablename__ = "counter_returns"
+
+    listing_id: Mapped[UUID] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), primary_key=True)
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    verification: Mapped[str] = mapped_column(String(24))
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class Notification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "notifications"
 

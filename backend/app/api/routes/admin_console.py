@@ -26,6 +26,7 @@ from app.db.models import (
 from app.schemas import AdminUserUpdate, SystemSettingUpdate
 from app.services.audit import add_audit
 from app.services.matching import normalized_factors
+from app.services.returns import confirmed_returns
 from app.services.traffic import traffic_totals
 
 router = APIRouter()
@@ -56,7 +57,7 @@ async def analytics_overview(
     start, end = _window(date_from, date_to)
     listing_filter = (Listing.created_at >= start, Listing.created_at < end)
     claim_filter = (Claim.created_at >= start, Claim.created_at < end)
-    handover_filter = (Handover.created_at >= start, Handover.created_at < end)
+    returns = confirmed_returns()
 
     users = await _count(db, User.id, User.created_at >= start, User.created_at < end)
     listings = await _count(db, Listing.id, *listing_filter)
@@ -64,8 +65,17 @@ async def analytics_overview(
     lost = await _count(db, Listing.id, *listing_filter, Listing.kind == "lost")
     matches = await _count(db, MatchCandidate.id, MatchCandidate.created_at >= start, MatchCandidate.created_at < end)
     claims = await _count(db, Claim.id, *claim_filter)
-    approved_claims = await _count(db, Claim.id, *claim_filter, Claim.status == "approved")
-    returned = await _count(db, Handover.id, *handover_filter, Handover.completed_at.is_not(None))
+    approved_claims = await _count(
+        db, Claim.id, *claim_filter, Claim.status.in_(["approved", "completed"]), Claim.decided_at < end
+    )
+    returned = await _count(
+        db, returns.c.listing_id, returns.c.completed_at >= start, returns.c.completed_at < end
+    )
+    cohort_returns = await db.scalar(
+        select(func.count(returns.c.listing_id))
+        .join(Listing, Listing.id == returns.c.listing_id)
+        .where(*listing_filter, Listing.kind == "found", returns.c.completed_at < end)
+    ) or 0
 
     bucket = func.date_trunc(granularity, Listing.created_at).label("bucket")
     series_rows = await db.execute(
@@ -108,7 +118,7 @@ async def analytics_overview(
             "claims": claims,
             "approved_claims": approved_claims,
             "returned": returned,
-            "return_rate": round(returned / max(found, 1) * 100, 2),
+            "return_rate": round(cohort_returns / found * 100, 2) if found else None,
             "claim_approval_rate": round(approved_claims / max(claims, 1) * 100, 2),
         },
         "funnel": [

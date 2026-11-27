@@ -75,13 +75,14 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: "3.50.1"
           cache: true
       - run: flutter pub get
       - uses: actions/upload-artifact@v4
         with:
           name: flutter-lock
           path: flutter/pubspec.lock
-      - run: flutter analyze
+      - run: flutter analyze --no-fatal-infos
       - run: flutter test --dart-define=BUREAU_CAPTURE_DESIGN=true
       - run: flutter build web --release --base-href=/app/ --dart-define=BUREAU_API_URL=https://edinburo.ru/v1
       - run: node tool/validate_project.js

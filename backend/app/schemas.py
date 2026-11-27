@@ -199,6 +199,12 @@ class ListingOut(APIModel):
 class ManagedListingOut(ListingOut):
     # Only management endpoints may expose the decrypted location.
     location: LocationInput | None = None
+    hidden_features: list[str] = Field(default_factory=list)
+
+
+class OrganizationInventoryItem(ListingOut):
+    branch_name: str | None = None
+    returned_at: datetime | None = None
 
 
 class ListingPage(APIModel):
@@ -345,6 +351,18 @@ class HandoverScan(APIModel):
     claim_id: UUID | None = None
 
 
+class CounterReturnCreate(APIModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verification: Literal["private_feature", "ownership_evidence"]
+    confirmed: Literal[True]
+
+
+class CounterReturnOut(APIModel):
+    listing_id: UUID
+    completed_at: datetime
+
+
 class OrganizationCreate(APIModel):
     name: str = Field(min_length=3, max_length=240)
     inn: str = Field(pattern=r"^\d{10}(\d{2})?$")
@@ -359,6 +377,7 @@ class OrganizationOut(APIModel):
     status: str
     api_enabled: bool
     created_at: datetime
+    member_role: str | None = None
 
 
 class BranchCreate(APIModel):

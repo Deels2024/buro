@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from app.core.config import settings
 
@@ -44,8 +45,18 @@ class ObjectStorage:
     def ensure_bucket(self) -> None:
         try:
             self.client.head_bucket(Bucket=settings.s3_bucket)
-        except Exception:
+        except ClientError as error:
+            if error.response["Error"]["Code"] not in {"404", "NotFound", "NoSuchBucket"}:
+                raise
             self.client.create_bucket(Bucket=settings.s3_bucket)
+
+    def ensure_private_bucket(self) -> None:
+        self.ensure_bucket()
+        try:
+            self.client.delete_bucket_policy(Bucket=settings.s3_bucket)
+        except ClientError as error:
+            if error.response["Error"]["Code"] != "NoSuchBucketPolicy":
+                raise
 
     def make_key(self, owner_id: UUID, filename: str, mime_type: str, purpose: str) -> str:
         extension = ALLOWED_EXTENSIONS[mime_type]
