@@ -22,13 +22,15 @@ from app.services.traffic import record_event
 router = APIRouter(include_in_schema=False)
 ORIGIN = "https://edinburo.ru"
 PUBLIC = (Listing.status == "active", Listing.moderation_status.in_(["approved", "auto_approved"]))
+PETERSBURG = "/byuro-nahodok-sankt-peterburg/"
+PETERSBURG_GUIDE_UPDATED = "2026-11-27"
 GUIDES = {
     "/poteryal-veshch/": "Что делать, если потерял вещь",
     "/nashel-veshch/": "Что делать, если нашёл вещь",
     "/naydennye-veshchi/": "Найденные вещи",
     "/poteryannye-veshchi/": "Потерянные вещи",
     "/byuro-nahodok-moskva/": "Бюро находок Москвы",
-    "/byuro-nahodok-sankt-peterburg/": "Бюро находок Санкт-Петербурга",
+    PETERSBURG: "Бюро находок Санкт-Петербурга",
 }
 CSS = """
 :root{--ink:#14263d;--muted:#52657b;--blue:#174de0;--line:#dce3ee;--bg:#f5f7fb;--green:#087c55}
@@ -92,6 +94,23 @@ async def home(db: DB) -> HTMLResponse:
     return page("Поиск потерянных и найденных вещей", "Найдите потерянную вещь или помогите вернуть находку владельцу. Открытый каталог по городам, проверка заявок и чат для передачи.", "/", body, schema={"@context":"https://schema.org", "@type":"WebSite", "name":"Бюро находок", "url":ORIGIN+"/", "inLanguage":"ru"})
 
 
+PETERSBURG_GUIDE = f"""
+<section class="note" aria-labelledby="petersburg-guide">
+  <h2 id="petersburg-guide">Куда обращаться, если потеряли вещь в Петербурге</h2>
+  <p>В каталоге Edinburo видны только опубликованные у нас объявления. Базы метро, аэропорта, железной дороги и торговых центров здесь не проверяются. Если помните место, обратитесь туда и не ждите появления вещи в каталоге.</p>
+  <h3>Метро</h3>
+  <p>Если вещь осталась в вагоне или на станции, укажите примерное время, станцию и направление поездки. Начните со <a href="https://metro.spb.ru/zabitieveshy.html?v=1">справочной о забытых вещах Петербургского метрополитена</a>. Если вы ещё на станции, обратитесь к сотруднику метро.</p>
+  <h3>Пулково</h3>
+  <p>Если вещь забыта в терминале, на привокзальной площади или парковке, обратитесь в <a href="https://pulkovoairport.ru/passengers/services/lost_and_found/">стол находок Пулково</a>. Если не прибыл зарегистрированный багаж, используйте отдельную <a href="https://pulkovoairport.ru/passengers/baggage/find/">инструкцию аэропорта по багажу</a>.</p>
+  <h3>Поезд, электричка или вокзал</h3>
+  <p>Для поезда дальнего следования ФПК есть <a href="https://lost.fpc.ru/">официальная заявка на поиск вещи</a>. Для электрички смотрите <a href="https://transpb.ppk-piter.ru/question_answer/faq/2/">порядок Северо-Западной пригородной пассажирской компании</a>. Если вещь оставили в здании вокзала, уточните порядок на стойке информации вокзала.</p>
+  <h3>Торговый центр</h3>
+  <p>Начните со стойки информации или охраны конкретного ТЦ. Например, у <a href="https://galeria.spb.ru/services/byuro-nahodok/">«Галереи»</a> указаны стойка и телефон, а у <a href="https://letomall.ru/found-office">ТРК «Лето»</a> есть отдельная страница бюро находок. Сообщите, где и когда вы были; уникальную примету оставьте для проверки владельца.</p>
+  <p class="meta">Ссылки и порядок обращения проверены <time datetime="{PETERSBURG_GUIDE_UPDATED}">27 ноября 2026 года</time>.</p>
+</section>
+"""
+
+
 @router.get("/naydennye-veshchi/")
 @router.get("/poteryannye-veshchi/")
 @router.get("/byuro-nahodok-moskva/")
@@ -99,7 +118,7 @@ async def home(db: DB) -> HTMLResponse:
 async def catalogue(request: Request, db: DB, q: str = Query("", max_length=200), region: str = Query("", max_length=180), category: str = Query("", max_length=80), p: int = Query(1, ge=1, le=10000)) -> HTMLResponse:
     await record_event("search")
     path = request.url.path
-    city = {"/byuro-nahodok-moskva/": "Москва", "/byuro-nahodok-sankt-peterburg/": "Санкт-Петербург"}.get(path)
+    city = {"/byuro-nahodok-moskva/": "Москва", PETERSBURG: "Санкт-Петербург"}.get(path)
     region = city or region.strip()
     kind = "lost" if path == "/poteryannye-veshchi/" else "found"
     filters = [Listing.kind == kind]
@@ -115,6 +134,10 @@ async def catalogue(request: Request, db: DB, q: str = Query("", max_length=200)
     items = await select_listings(db, filters, 24, (p-1)*24, ranking=ranking)
     title = GUIDES[path]
     desc = f"{title}: реальные объявления с описанием, фотографиями, местом и датой. Сравните признаки и свяжитесь с держателем через проверку заявки."
+    show_petersburg_guide = path == PETERSBURG and p == 1 and not (q.strip() or category)
+    if show_petersburg_guide:
+        desc = ("Поиск потерянных вещей в Санкт-Петербурге. Проверьте каталог Edinburo "
+                "или узнайте, куда обратиться после потери в метро, Пулково, поезде и ТЦ.")
     options = '<option value="">Все категории</option>' + ''.join(f'<option value="{code}" {"selected" if code == category else ""}>{label}</option>' for code,label in CATEGORIES.items())
     body = f'<nav class="breadcrumbs"><a href="/">Главная</a><span> / {title}</span></nav><h1>{title}</h1><p class="lead">{desc}</p><form class="search" method="get"><label>Название или примета<input name="q" value="{escape(q)}" maxlength="200"></label><label>Город<input name="region" value="{escape(region)}" maxlength="180" {"readonly" if city else ""}></label><label>Категория<select name="category">{options}</select></label><button>Найти</button></form><p class="meta">Объявлений: {total}. Страница {p}.</p>' + cards(items)
     params = {"q":q, "region":region, "category":category}
@@ -124,6 +147,10 @@ async def catalogue(request: Request, db: DB, q: str = Query("", max_length=200)
     if p*24<total:
         body += f'<a href="?{escape(urlencode({**params,"p":p+1}))}" rel="next">Следующая →</a>'
     body += '</nav><div class="note"><h2>Нет вашей вещи?</h2><p>Добавьте описание пропажи. Укажите место, примерную дату и приметы, а уникальные детали оставьте для проверки владельца.</p><a class="button" href="/app/?action=lost">Сообщить о пропаже</a></div>'
+    if show_petersburg_guide:
+        body += PETERSBURG_GUIDE
+    elif path == PETERSBURG:
+        body += f'<p><a href="{PETERSBURG}#petersburg-guide">Куда ещё обратиться в Петербурге</a></p>'
     canonical = path + (f"?p={p}" if p>1 else "")
     return page(title + (f" — страница {p}" if p>1 else ""), desc, canonical, body, noindex=bool(q or category or (region and not city) or (not items and p>1)))
 
@@ -211,7 +238,8 @@ async def sitemap(db: DB) -> Response:
 
 @router.get("/sitemaps/pages.xml")
 async def sitemap_pages() -> Response:
-    return sitemap_urls([("/", None), *((path, None) for path in GUIDES), ("/organizations/", None)])
+    return sitemap_urls([("/", None), *((path, PETERSBURG_GUIDE_UPDATED if path == PETERSBURG else None)
+                                      for path in GUIDES), ("/organizations/", None)])
 
 
 @router.get("/sitemaps/items-{part}.xml")
